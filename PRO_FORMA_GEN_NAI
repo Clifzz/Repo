@@ -1,0 +1,13 @@
+#Before running the code you need to know the Total Sq/ft rented,Occupied square footage, Operating expenses per square foot, the Market rent growth rate, Cap rate , Market #average rate, Market rent growth percentage , start year of proforma ,start month of proforma ,number of years to project and number of tenants.
+
+#As well as Tenant name, suite #, square footage, rent per SF, lease expiry date, year one over ride rate if needed, projection type, growth rate, or flat growth increase for #pro_rated leases for each tenant. Will also need details for renewed leases like new lease start date, years in new lease, new growth rate
+
+#INSTRUCTIONS:
+
+# the run button for the first cell and wait till all packages are downloaded
+
+# the run button on the main script then input all needed data, be careful to put it in exact format it asks for
+
+#3.Change the file name in the last cell to the name of your file - will be shown at bottom of output with a (Excel Upload Complete) line, then run the final cell
+
+#4.Enjoy your downloaded proforma / rent roll projections!
