@@ -1,0 +1,1596 @@
+from google.colab import files
+uploaded = files.upload()
+
+#------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd, re
+
+df = pd.read_csv(next(iter(uploaded.keys())), low_memory=False)
+df.head(), df.shape, df.columns
+
+#--------------------------------------------------------------------------------------------------------------------
+
+# This cell defines a function to convert string to snake case and applies it to all column names in the DataFrame.
+# It then displays the updated column names.
+def to_snake(s):
+    s = re.sub(r"[^\w]+", "_", s.strip())
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    return re.sub(r"_+", "_", s).lower().strip("_")
+
+df = df.rename(columns={c: to_snake(c) for c in df.columns})
+df.columns
+
+#----------------------------------------------------------------------------------------------------------------------
+
+# This cell defines a function to combine date and time columns into a single datetime column,
+# attempting to parse various formats robustly. It then applies this function to
+# 'reported_date'/'reported_time', 'from_date'/'from_time', and 'to_date'/'to_time'
+
+import pandas as pd
+import re
+
+def combine_dt_try_formats(df, d, t, out):
+    if d in df and t in df:
+        s = df[d].astype(str).str.strip() + " " + df[t].astype(str).str.strip()
+
+        s = s.str.replace(r'(\d{1,2}):(\d{2})(?!:)', r'\1:\2:00', regex=True)
+
+        fmts = [
+            "%Y-%m-%d %H:%M:%S",      # 2024-05-01 13:45:00
+            "%m/%d/%Y %H:%M:%S",      # 05/01/2024 13:45:00
+            "%m/%d/%Y %I:%M:%S %p",   # 05/01/2024 1:45:00 PM
+            "%Y-%m-%d %I:%M:%S %p",   # 2024-05-01 1:45:00 PM
+            "%m/%d/%y %H:%M:%S",      # 05/01/24 13:45:00
+        ]
+        dt = pd.Series(pd.NaT, index=df.index)
+        for fmt in fmts:
+            parsed = pd.to_datetime(s, format=fmt, errors="coerce")
+            dt = dt.where(dt.notna(), parsed)  # fill where still NaT
+        df[out] = dt
+    return df
+
+for d,t,n in [
+    ("reported_date","reported_time","reported_datetime"),
+    ("from_date","from_time","from_datetime"),
+    ("to_date","to_time","to_datetime"),
+]:
+    df = combine_dt_try_formats(df, d, t, n)
+
+df[["reported_datetime","from_datetime","to_datetime"]].head()
+
+#-------------------------------------------------------------------------------------------------------------------------
+
+# This cell displays the first 11 rows of the 'to_date' and 'to_time' columns
+# and then calculates and displays the percentage of missing values in these columns after normalizing blanks.
+df.loc[:10, ["to_date","to_time"]]
+df[["to_date","to_time"]].replace(r"^\s*$", pd.NA, regex=True).isna().mean()
+
+#--------------------------------------------------------------------------------------------------------------------------
+
+# This cell normalizes blank values in 'to_date' and 'to_time' columns to pandas NA.
+
+df["to_date"] = df.get("to_date", pd.Series(pd.NA, index=df.index)).astype("string").replace(r"^\s*$", pd.NA, regex=True)
+df["to_time"] = df.get("to_time", pd.Series(pd.NA, index=df.index)).astype("string").replace(r"^\s*$", pd.NA, regex=True)
+
+# helper to parse one date+time pair with a few formats
+def parse_dt(datestr, timestr):
+    s = (datestr.fillna("") + " " + timestr.fillna("")).str.strip().str.replace(r'(\d{1,2}):(\d{2})(?!:)', r'\1:\2:00', regex=True)
+    fmts = ["%Y-%m-%d %H:%M:%S","%m/%d/%Y %H:%M:%S","%m/%d/%Y %I:%M:%S %p","%m/%d/%Y %H:%M","%m/%d/%y %H:%M:%S"]
+    out = pd.Series(pd.NaT, index=s.index)
+    for f in fmts:
+        parsed = pd.to_datetime(s, format=f, errors="coerce")
+        out = out.where(out.notna(), parsed)
+    return out
+
+# start from existing from_datetime as fallback
+to_dt = pd.Series(pd.NaT, index=df.index)
+
+mask_both = df["to_date"].notna() & df["to_time"].notna()
+to_dt.loc[mask_both] = parse_dt(df.loc[mask_both,"to_date"], df.loc[mask_both,"to_time"])
+
+if "from_time" in df.columns:
+    mask_date_only = df["to_date"].notna() & df["to_time"].isna()
+    to_dt.loc[mask_date_only] = parse_dt(df.loc[mask_date_only,"to_date"], df.loc[mask_date_only,"from_time"])
+
+# write back
+df["to_datetime"] = to_dt
+df[["reported_datetime","from_datetime","to_datetime"]].head(10)
+
+#------------------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell extracts latitude and longitude from the 'location' column
+# and creates new 'latitude' and 'longitude' columns, converting them to numeric.
+if "location" in df.columns:
+    lat = df["location"].astype(str).str.extract(r"\(\s*([-+]?\d*\.?\d+)\s*,")[0]
+    lon = df["location"].astype(str).str.extract(r",\s*([-+]?\d*\.?\d+)\s*\)")[0]
+    df["latitude"]  = pd.to_numeric(lat, errors="coerce")
+    df["longitude"] = pd.to_numeric(lon, errors="coerce")
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+
+
+# This cell defines a function to clean flag columns (like 'DVFlag', 'Fire Arm Used Flag')
+# by converting them to uppercase and mapping common true/false strings to boolean values.
+
+def clean_flag(s):
+    s = s.astype(str).str.strip().str.upper()
+    true, false = {"Y","YES","TRUE","T","1"}, {"N","NO","FALSE","F","0"}
+    out = pd.Series(pd.NA, index=s.index, dtype="boolean")
+    out[s.isin(true)]  = True
+    out[s.isin(false)] = False
+    return out
+
+for col in ["dv_flag","fire_arm_used_flag"]:
+    if col in df.columns:
+        df[col] = clean_flag(df[col])
+
+#---------------------------------------------------------------------------------------------------------------------------------
+
+# This cell cleans various categorical columns by stripping whitespace and replacing multiple spaces with a single space.
+for col in ["offense","ibrs","description","city","area","involvement","race","sex","beat"]:
+    if col in df.columns:
+        df[col] = df[col].astype(str).str.strip().str.replace(r"\s+"," ", regex=True)
+
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell cleans the 'age' column by converting it to numeric and setting unrealistic ages (<0 or >110) to NA.
+# It also cleans the 'zip_code' column by removing non-digits and padding to 5 digits.
+if "age" in df.columns:
+    df["age"] = pd.to_numeric(df["age"], errors="coerce")
+    df.loc[(df["age"] < 0) | (df["age"] > 110), "age"] = pd.NA
+
+if "zip_code" in df.columns:
+    df["zip_code"] = (
+        df["zip_code"].astype(str).str.replace(r"[^\d]", "", regex=True).str.zfill(5)
+    )
+
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell extracts hour, day of week, and month from the datetime columns
+for c in ["reported_datetime","from_datetime","to_datetime"]:
+    if c in df.columns:
+        df[f"{c}_hour"]   = df[c].dt.hour
+        df[f"{c}_dow"]    = df[c].dt.dayofweek
+        df[f"{c}_month"]  = df[c].dt.month
+        df[f"{c}_week"]   = df[c].dt.isocalendar().week.astype("Int64")
+
+#----------------------------------------------------------------------------------------------------------------------------------
+
+# This cell displays the percentage of missing values for the top 15 columns with the most missing data.
+
+df.isna().mean().sort_values(ascending=False).head(15)
+df.nunique().sort_values().head(15), df.nunique().sort_values(ascending=False).head(15)
+
+#---------------------------------------------------------------------------------------------------------------------------------
+
+# This cell saves the cleaned DataFrame to a CSV file named 'kcpd_2024_clean.csv'.
+clean_path = "kcpd_2024_clean.csv"
+df.to_csv(clean_path, index=False)
+clean_path
+
+#-------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell downloads the 'kcpd_2024_clean.csv' file to your local machine.
+from google.colab import files; files.download("kcpd_2024_clean.csv")
+
+#----------------------------------------------------------------------------------------------------------------------------------
+
+# This cell re-defines the combine_dt_try_formats function and applies it to the date and time columns.
+# It also includes a check to remove rows where 'reported_datetime' is before 'from_datetime'.
+def combine_dt_try_formats(df, d, t, out):
+    if d in df and t in df:
+        s = df[d].astype(str).str.strip() + " " + df[t].astype(str).str.strip()
+        s = s.str.replace(r'(\d{1,2}):(\d{2})(?!:)', r'\1:\2:00', regex=True)
+        fmts = ["%Y-%m-%d %H:%M:%S","%m/%d/%Y %H:%M:%S","%m/%d/%Y %I:%M:%S %p","%m/%d/%Y %H:%M","%m/%d/%y %H:%M:%S"]
+        out_ser = pd.Series(pd.NaT, index=df.index)
+        for f in fmts:
+            parsed = pd.to_datetime(s, format=f, errors="coerce")
+            out_ser = out_ser.where(out_ser.notna(), parsed)
+        df[out] = out_ser
+    return df
+
+for d,t,n in [
+    ("reported_date","reported_time","reported_datetime"),
+    ("from_date","from_time","from_datetime"),
+    ("to_date","to_time","to_datetime"),
+]:
+    df = combine_dt_try_formats(df, d, t, n)
+
+
+bad_order = (df["reported_datetime"].notna() & df["from_datetime"].notna()
+             & (df["reported_datetime"] < df["from_datetime"]))
+df = df.loc[~bad_order].copy()
+
+#----------------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell cleans the 'zip_code' column by removing non-digits, handling a specific 6-digit case,
+# normalizing to 5 digits, and treating all-zero zip codes as missing.
+if "zip_code" in df.columns:
+    z = df["zip_code"].astype(str).str.replace(r"\D", "", regex=True)
+
+    z = z.where(~((z.str.len() == 6) & z.str.endswith("0")), z.str[:-1])
+    # Normalize to 5 digits
+    z = z.where(z.str.len() == 5, pd.NA)
+
+    z = z.mask(z == "00000", pd.NA)
+    df["zip_code"] = z
+
+#-------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell drops the 'latitude' and 'longitude' columns if all values in them are missing.
+for col in ["latitude","longitude"]:
+    if col in df.columns:
+        if df[col].isna().all():
+            df.drop(columns=[col], inplace=True)
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell extracts latitude and longitude from the 'location' column using a regex pattern for POINT geometry.
+# It then filters the DataFrame to keep only rows with coordinates within a rough bounding box for Kansas and Missouri.
+
+import numpy as np
+
+if "location" in df.columns:
+    coords = df["location"].astype(str).str.extract(
+        r"POINT\s*\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s*\)"
+    )
+    lon = pd.to_numeric(coords[0], errors="coerce")
+    lat = pd.to_numeric(coords[1], errors="coerce")
+
+    # KS+MO box
+    lat_min, lat_max = 36.0, 40.6
+    lon_min, lon_max = -102.1, -89.0
+
+    in_bbox = lat.between(lat_min, lat_max) & lon.between(lon_min, lon_max)
+    df = df.loc[in_bbox].copy()
+else:
+
+    df = df[df["location"].notna()].copy()
+
+#--------------------------------------------------------------------------------------------------------------------------------
+
+# This cell identifies and removes exact duplicate rows from the DataFrame and prints the number of rows dropped.
+before = len(df)
+df = df.drop_duplicates().copy()
+after = len(df)
+print(f"Dropped {before - after} exact duplicate rows.")
+
+#------------------------------------------------------------------------------------------------------------------------------
+
+# This cell defines a list of key columns and removes rows that have missing values in any of these key columns.
+# It then prints the number of rows remaining.
+key_cols = [c for c in [
+    "report_no",
+    "reported_datetime",
+    "from_datetime",
+    "offense",
+    "address",
+    "location",
+    "zip_code"
+] if c in df.columns]
+
+df = df.dropna(subset=key_cols).copy()
+print("Rows remaining:", len(df))
+
+#--------------------------------------------------------------------------------------------------------------------------------------
+
+# This cell extracts hour, day of week, and month from the 'reported_datetime', 'from_datetime',
+# and 'to_datetime' columns and creates new columns for each.
+for c in ["reported_datetime","from_datetime","to_datetime"]:
+    if c in df.columns:
+        df[f"{c}_hour"]  = df[c].dt.hour
+        df[f"{c}_dow"]   = df[c].dt.dayofweek
+        df[f"{c}_month"] = df[c].dt.month
+
+df.isna().mean().sort_values(ascending=False).head(15)
+
+#------------------------------------------------------------------------------------------------------------------------------------
+# This cell saves the cleaned DataFrame to a CSV file named 'kcpd_2024_clean_ml_ready.csv'
+
+clean_path = "kcpd_2024_clean_ml_ready.csv"
+df.to_csv(clean_path, index=False)
+from google.colab import files; files.download(clean_path)
+#-----------------------------------------------------------------------------------------------------------------------------
+
+# This cell uploads a file from your local machine to the Colab environment.
+from google.colab import files
+uploaded = files.upload()
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+
+# KC Crime — Multi‑Target Runner (Chrono Split + Leakage Guard + Calibration)
+# This version runs the full modeling & export pipeline for **multiple binary targets**
+
+
+import re
+import gc
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, MaxAbsScaler, FunctionTransformer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.calibration import CalibrationDisplay
+from sklearn.inspection import permutation_importance
+
+
+try:
+    from sklearn.calibration import CalibratedClassifierCV
+    HAS_CAL = True
+except Exception:
+    HAS_CAL = False
+
+try:
+    import category_encoders as ce
+    HAS_CE = True
+except Exception:
+    HAS_CE = False
+
+CSV_PATH = 'kcpd_2024_clean_ml_ready.csv'
+
+TARGETS = None
+RANDOM_SEED = 42
+N_BOOT = 200
+
+# De‑risk / realism toggles
+TIME_SPLIT = True
+CALIBRATE  = True
+LEAKAGE_GUARD = True
+
+# Ablation toggles (optional)
+RUN_ABLATION_LOCATION = True
+RUN_ABLATION_TEMPORAL = True
+
+# Memory knobs
+FLOAT_DTYPE = np.float32
+LASSO_TRAIN_FRAC = 1.0
+OHE_MIN_FREQ = 0.005
+MAX_CATEGORIES = None
+
+# Export preferences
+SPATIAL_KEY_OVERRIDE = 'beat'
+
+# Columns to ignore from modeling globally
+EXCLUDE_COLS = set(['report_no', 'case_number', 'call_id', 'description'])
+ID_LIKE  = ['beat', 'district', 'zone', 'tract', 'grid']
+TIME_LIKE = ['reported_date', 'from_date', 'to_date', 'date', 'datetime', 'timestamp']
+
+
+LEAK_BASE_PATTERNS = re.compile(r"weapon|firearm|fire_arm|gun|armed|shots?|shoot|rifle|pistol|handgun|shotgun", re.I)
+
+
+def _coerce_binary(y: pd.Series) -> pd.Series:
+    if y.dtype == bool:
+        return y.astype(int)
+    if y.dtype == object:
+        mapping = {'yes':1,'y':1,'true':1,'t':1,'1':1,'no':0,'n':0,'false':0,'f':0,'0':0}
+        lower = y.astype(str).str.strip().str.lower()
+        if set(lower.unique()).issubset(set(mapping.keys())):
+            return lower.map(mapping).astype(int)
+    try:
+        z = pd.to_numeric(y, errors='raise')
+        uq = pd.unique(z.dropna())
+        if len(uq) <= 2:
+            if len(uq) == 1:
+                raise ValueError('Only one class present.')
+            lo, hi = np.min(uq), np.max(uq)
+            return (z == hi).astype(int)
+        if set(uq).issubset({0,1}):
+            return z.astype(int)
+    except Exception:
+        pass
+    raise ValueError('Cannot coerce column to binary {0,1}.')
+
+
+def discover_binary_targets(df: pd.DataFrame, max_targets: int = 12) -> list:
+    """Return up to max_targets binary columns suitable as targets (excluding IDs/time)."""
+    cand = []
+    skip = set().union(EXCLUDE_COLS, ID_LIKE, TIME_LIKE)
+    for col in df.columns:
+        if col in skip:
+            continue
+        try:
+            yb = _coerce_binary(df[col])
+            if yb.nunique() == 2:
+                base = float(yb.mean())
+
+                score = 2 * (0.01 < base < 0.8)
+
+                for tok in ['flag','target','label','y','used','present','occur']:
+                    if tok in col.lower():
+                        score += 1
+                cand.append((score, col, base))
+        except Exception:
+            continue
+    if not cand:
+        raise ValueError('No binary targets discovered. Set TARGETS manually.')
+    cand.sort(key=lambda x: (x[0], -abs(0.2 - x[2])), reverse=True)
+    picked = [c[1] for c in cand[:max_targets]]
+    print('[Info] Auto‑discovered targets:', picked)
+    return picked
+
+
+def capture_table(y_true, y_prob, ks=(0.01, 0.05, 0.10, 0.20)):
+    out = []
+    order = np.argsort(-y_prob)
+    n = len(y_prob)
+    pos_total = float(y_true.sum()) + 1e-12
+    for k in ks:
+        top_n = max(1, int(np.ceil(n * k)))
+        top_idx = order[:top_n]
+        thr = float(y_prob[order[top_n - 1]])
+        capture = float(y_true[top_idx].sum()) / pos_total
+        out.append({'top_k_pct': int(k*100), 'coverage': top_n/n, 'capture': capture, 'threshold': thr})
+    return pd.DataFrame(out)
+
+
+def bootstrap_ci(y_true, y_prob, n_boot=N_BOOT, seed=RANDOM_SEED):
+    rng = np.random.default_rng(seed)
+    aucs, pras = [], []
+    n = len(y_true)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        y_b = y_true[idx]
+        p_b = y_prob[idx]
+        if y_b.sum() == 0 or y_b.sum() == len(y_b):
+            continue
+        try:
+            aucs.append(roc_auc_score(y_b, p_b))
+            pras.append(average_precision_score(y_b, p_b))
+        except Exception:
+            continue
+    def ci(a):
+        if len(a) == 0:
+            return {'mean': np.nan, 'lo': np.nan, 'hi': np.nan}
+        return {'mean': float(np.mean(a)), 'lo': float(np.percentile(a, 2.5)), 'hi': float(np.percentile(a, 97.5))}
+    return {'auroc': ci(aucs), 'prauc': ci(pras)}
+
+
+
+def run_for_target(df: pd.DataFrame, target: str):
+    print(f"\n================= TARGET: {target} =================")
+
+    y = _coerce_binary(df[target])
+
+
+    time_col = None
+    for c in TIME_LIKE:
+        if c in df.columns:
+            time_col = c; break
+
+
+    meta_cols = [c for c in (ID_LIKE + TIME_LIKE) if c in df.columns]
+    feat_cols = [c for c in df.columns if c not in set([target]) | EXCLUDE_COLS | set(meta_cols)]
+
+    if LEAKAGE_GUARD:
+
+        toks = [t for t in re.split(r"[^a-zA-Z0-9]+", target.lower()) if t]
+        targ_pat = re.compile(r"|".join(map(re.escape, toks)), re.I) if toks else None
+        keep, dropped = [], []
+        for c in feat_cols:
+            drop = False
+            if LEAK_BASE_PATTERNS.search(c):
+                drop = True
+            if targ_pat and targ_pat.search(c):
+                drop = True
+            if drop:
+                dropped.append(c)
+            else:
+                keep.append(c)
+        feat_cols = keep
+        if dropped:
+            print('[Info] Leakage guard dropped columns:', sorted(dropped)[:20], ('...' if len(dropped)>20 else ''))
+
+    X_full = df[feat_cols].copy()
+
+    # Downcast numeric to float32 to reduce RAM
+    for c in X_full.columns:
+        if pd.api.types.is_float_dtype(X_full[c]):
+            X_full[c] = X_full[c].astype(FLOAT_DTYPE)
+        elif pd.api.types.is_integer_dtype(X_full[c]):
+            X_full[c] = pd.to_numeric(X_full[c], downcast='integer')
+
+    num_cols = [c for c in X_full.columns if pd.api.types.is_numeric_dtype(X_full[c])]
+    cat_cols = [c for c in X_full.columns if c not in num_cols]
+
+    print(f"[Info] Rows: {len(df):,} | Num cols: {len(num_cols)} | Cat cols: {len(cat_cols)} | Pos rate: {y.mean():.3%}")
+
+
+    if TIME_SPLIT and time_col is not None:
+        t = pd.to_datetime(df[time_col], errors='coerce')
+        ok = t.notna()
+        X_full, y, t = X_full.loc[ok], y.loc[ok], t.loc[ok]
+        order = np.argsort(t.values)
+        X_full = X_full.iloc[order]
+        y = y.iloc[order]
+        n = len(y)
+        i_tr = int(0.6*n); i_va = int(0.8*n)
+        X_train, y_train = X_full.iloc[:i_tr], y.iloc[:i_tr]
+        X_val,   y_val   = X_full.iloc[i_tr:i_va], y.iloc[i_tr:i_va]
+        X_test,  y_test  = X_full.iloc[i_va:], y.iloc[i_va:]
+        print(f"[Info] Chronological split on '{time_col}': train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+    else:
+        X_tmp, X_test, y_tmp, y_test = train_test_split(X_full, y, test_size=0.2, stratify=y, random_state=RANDOM_SEED)
+        rel_val = 0.2 / 0.8
+        X_train, X_val, y_train, y_val = train_test_split(X_tmp, y_tmp, test_size=rel_val, stratify=y_tmp, random_state=RANDOM_SEED)
+        print(f"[Info] Stratified split: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+
+
+    if HAS_CE and len(cat_cols) > 0:
+        cat_boost = ('cat_te', ce.TargetEncoder(handle_unknown='value', handle_missing='value', min_samples_leaf=20, smoothing=10.0), cat_cols)
+    else:
+        cat_boost = ('cat_ord', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), cat_cols)
+
+    pre_boost = ColumnTransformer([
+        ('num', SimpleImputer(strategy='median'), num_cols),
+        cat_boost
+    ], remainder='drop', sparse_threshold=0.0)
+
+    boost_clf = HistGradientBoostingClassifier(
+        learning_rate=0.07,
+        max_leaf_nodes=31,
+        min_samples_leaf=20,
+        early_stopping=True,
+        random_state=RANDOM_SEED
+    )
+
+    boost_pipe = Pipeline([
+        ('pre', pre_boost),
+        ('to32', FunctionTransformer(lambda a: a.astype(FLOAT_DTYPE))),
+        ('clf', boost_clf)
+    ])
+
+    # LASSO
+    if LASSO_TRAIN_FRAC < 1.0:
+        rs = np.random.RandomState(RANDOM_SEED)
+        lasso_idx = rs.choice(len(X_train), size=int(len(X_train)*LASSO_TRAIN_FRAC), replace=False)
+        X_train_lasso = X_train.iloc[lasso_idx]
+        y_train_lasso = y_train.iloc[lasso_idx]
+    else:
+        X_train_lasso, y_train_lasso = X_train, y_train
+
+    # Robust OHE
+    try:
+        cat_ohe = OneHotEncoder(handle_unknown='infrequent_if_exist', min_frequency=OHE_MIN_FREQ, max_categories=MAX_CATEGORIES, sparse_output=True, dtype=FLOAT_DTYPE)
+    except TypeError:
+        try:
+            cat_ohe = OneHotEncoder(handle_unknown='ignore', sparse=True, dtype=FLOAT_DTYPE)
+        except TypeError:
+            cat_ohe = OneHotEncoder(handle_unknown='ignore')
+
+    pre_lasso = ColumnTransformer([
+        ('num', Pipeline([('impute', SimpleImputer(strategy='median')), ('scale', MaxAbsScaler())]), num_cols),
+        ('cat', cat_ohe, cat_cols)
+    ], remainder='drop', sparse_threshold=1.0)
+
+    lasso_pipe = Pipeline([
+        ('pre', pre_lasso),
+        ('clf', LogisticRegression(penalty='l1', solver='saga', max_iter=5000, random_state=RANDOM_SEED))
+    ])
+
+
+    boost_pipe.fit(X_train, y_train)
+    if CALIBRATE and HAS_CAL:
+        cal_boost = CalibratedClassifierCV(boost_pipe, method='sigmoid', cv='prefit')
+        cal_boost.fit(X_val, y_val)
+        boost_model = cal_boost
+        print('[Info] Boosting calibrated via Platt scaling on validation set.')
+    else:
+        boost_model = boost_pipe
+
+    lasso_pipe.fit(X_train_lasso, y_train_lasso)
+
+    # Evaluate
+    val_prob_boost = boost_model.predict_proba(X_val)[:, 1]
+    val_prob_lasso = lasso_pipe.predict_proba(X_val)[:, 1]
+    test_prob_boost = boost_model.predict_proba(X_test)[:, 1]
+    test_prob_lasso = lasso_pipe.predict_proba(X_test)[:, 1]
+
+    def _metrics(y_true, y_prob):
+        return {'auroc': float(roc_auc_score(y_true, y_prob)), 'prauc': float(average_precision_score(y_true, y_prob)), 'base_rate': float(np.mean(y_true))}
+
+    print("\n=== BOOSTING (Validation) ===\n", _metrics(y_val.values, val_prob_boost))
+    val_caps_boost = capture_table(y_val.values, val_prob_boost)
+    print(val_caps_boost.to_string(index=False))
+
+    print("\n=== LASSO (Validation) ===\n", _metrics(y_val.values, val_prob_lasso))
+    val_caps_lasso = capture_table(y_val.values, val_prob_lasso)
+    print(val_caps_lasso.to_string(index=False))
+
+    print("\n=== BOOSTING (Test) ===\n", _metrics(y_test.values, test_prob_boost))
+    print(capture_table(y_test.values, test_prob_boost).to_string(index=False))
+
+    print("\n=== LASSO (Test) ===\n", _metrics(y_test.values, test_prob_lasso))
+    print(capture_table(y_test.values, test_prob_lasso).to_string(index=False))
+
+    print('\nBootstrapping 95% CIs on TEST metrics (reps =', N_BOOT, ') ...')
+    ci_boost = bootstrap_ci(y_test.values, test_prob_boost)
+    ci_lasso = bootstrap_ci(y_test.values, test_prob_lasso)
+    print('\n[Boosting]  AUROC  mean/95%CI:', ci_boost['auroc'])
+    print('[Boosting]  PR‑AUC mean/95%CI:', ci_boost['prauc'])
+    print('\n[LASSO]     AUROC  mean/95%CI:', ci_lasso['auroc'])
+    print('[LASSO]     PR‑AUC mean/95%CI:', ci_lasso['prauc'])
+
+
+    outdir = os.path.join('outputs', target)
+    os.makedirs(outdir, exist_ok=True)
+
+
+    def _capture_curve(y_true_arr, y_prob_arr, max_k=0.20, step=0.005):
+        ks = np.arange(step, max_k + 1e-9, step)
+        n = len(y_prob_arr)
+        order = np.argsort(-y_prob_arr)
+        y_sorted = y_true_arr[order]
+        cum_pos = np.cumsum(y_sorted)
+        total_pos = float(y_true_arr.sum()) + 1e-12
+        caps = []
+        for k in ks:
+            top_n = max(1, int(np.ceil(n * k)))
+            caps.append(float(cum_pos[top_n - 1]) / total_pos)
+        return ks, np.array(caps)
+
+    ks_b, cap_b = _capture_curve(y_test.values, test_prob_boost)
+    ks_l, cap_l = _capture_curve(y_test.values, test_prob_lasso)
+
+    pd.DataFrame({'k_pct': (ks_b * 100), 'capture_boost': (cap_b * 100), 'capture_lasso': (cap_l * 100)}).to_csv(os.path.join(outdir, 'workload_vs_capture.csv'), index=False)
+
+    plt.figure()
+    plt.plot(ks_b * 100, cap_b * 100, label='Boosting')
+    plt.plot(ks_l * 100, cap_l * 100, label='LASSO')
+    for v in [1, 5, 10]: plt.axvline(v, linestyle='--')
+    plt.xlabel('Top-K (%)'); plt.ylabel('Capture (%)'); plt.title(f'Workload vs. Capture (Test) — {target}')
+    plt.legend(); plt.tight_layout(); plt.savefig(os.path.join(outdir, 'workload_vs_capture.png'), dpi=200); plt.close()
+
+    # Precision@K
+    def precision_at_k_table(y_true_arr, y_prob_arr, ks=(0.01, 0.05, 0.10, 0.20)):
+        res = []; n = len(y_prob_arr)
+        order = np.argsort(-y_prob_arr)
+        y_sorted = y_true_arr[order]
+        cum_pos = np.cumsum(y_sorted)
+        total_pos = float(y_true_arr.sum()) + 1e-12
+        for k in ks:
+            top_n = max(1, int(np.ceil(n * k)))
+            tp = int(cum_pos[top_n - 1])
+            precision = tp / top_n; recall = tp / total_pos
+            res.append({'k_pct': int(k * 100), 'flagged': top_n, 'true_pos': tp, 'precision': float(precision), 'recall': float(recall)})
+        return pd.DataFrame(res)
+
+    tab_b = precision_at_k_table(y_test.values, test_prob_boost); tab_b['model'] = 'Boosting'
+    tab_l = precision_at_k_table(y_test.values, test_prob_lasso); tab_l['model'] = 'LASSO'
+    prec_at_k = pd.concat([tab_b, tab_l], ignore_index=True)
+    prec_at_k.to_csv(os.path.join(outdir, 'precision_at_k.csv'), index=False)
+
+    # PR curves
+    base_rate_test = float(y_test.mean())
+    prec_b, rec_b, _ = precision_recall_curve(y_test.values, test_prob_boost)
+    prec_l, rec_l, _ = precision_recall_curve(y_test.values, test_prob_lasso)
+    pd.DataFrame({'recall': rec_b, 'precision': prec_b, 'model': 'Boosting'}).to_csv(os.path.join(outdir, 'pr_points_boost.csv'), index=False)
+    pd.DataFrame({'recall': rec_l, 'precision': prec_l, 'model': 'LASSO'}).to_csv(os.path.join(outdir, 'pr_points_lasso.csv'), index=False)
+    plt.figure(); plt.plot(rec_b, prec_b, label='Boosting'); plt.plot(rec_l, prec_l, label='LASSO'); plt.axhline(base_rate_test, linestyle='--')
+    plt.xlabel('Recall'); plt.ylabel('Precision'); plt.title(f'Precision-Recall (Test) — {target}'); plt.legend(); plt.tight_layout(); plt.savefig(os.path.join(outdir, 'pr_curve.png'), dpi=200); plt.close()
+
+    # Reliability (Boosting: before vs after)
+    uncal_test_prob = boost_pipe.predict_proba(X_test)[:, 1]
+    plt.figure(); CalibrationDisplay.from_predictions(y_test.values, uncal_test_prob, n_bins=10, name='Boosting (uncalibrated)')
+    CalibrationDisplay.from_predictions(y_test.values, test_prob_boost, n_bins=10, name='Boosting (calibrated)')
+    plt.title(f'Reliability Plot — Boosting — {target}'); plt.tight_layout(); plt.savefig(os.path.join(outdir, 'calibration_boosting.png'), dpi=200); plt.close()
+
+    # Feature signal
+    sample_idx = np.arange(len(X_test));
+    if len(sample_idx) > 5000:
+        rng = np.random.RandomState(RANDOM_SEED); sample_idx = rng.choice(len(X_test), size=5000, replace=False)
+    X_pi = X_test.iloc[sample_idx]; y_pi = y_test.iloc[sample_idx]
+    try:
+        r = permutation_importance(boost_model, X_pi, y_pi, n_repeats=5, random_state=RANDOM_SEED, scoring='average_precision')
+        feat_names_boost = list(num_cols) + list(cat_cols)
+        perm_df = pd.DataFrame({'feature': feat_names_boost, 'importance_mean': r.importances_mean, 'importance_std': r.importances_std}).sort_values('importance_mean', ascending=False)
+        perm_df.to_csv(os.path.join(outdir, 'feature_importance_boosting.csv'), index=False)
+        topn = perm_df.head(20)
+        plt.figure(figsize=(8, 6)); plt.barh(list(topn['feature'][::-1]), list(topn['importance_mean'][::-1]))
+        plt.xlabel('Permutation Importance (Δ Average Precision)'); plt.title(f'Boosting — Top Features — {target}')
+        plt.tight_layout(); plt.savefig(os.path.join(outdir, 'feature_importance_boosting.png'), dpi=200); plt.close()
+    except Exception as e:
+        print('[Warn] Permutation importance failed:', e)
+
+    try:
+        pre = lasso_pipe.named_steps['pre']; clf = lasso_pipe.named_steps['clf']
+        try: lasso_feature_names = pre.get_feature_names_out()
+        except Exception: lasso_feature_names = [f'f{i}' for i in range(clf.coef_.shape[1])]
+        coefs = clf.coef_.ravel(); lasso_df = pd.DataFrame({'feature': lasso_feature_names, 'coef': coefs, 'abs_coef': np.abs(coefs)}).sort_values('abs_coef', ascending=False)
+        lasso_df.head(50).to_csv(os.path.join(outdir, 'lasso_top_coeffs.csv'), index=False)
+        t25 = lasso_df.head(25)
+        plt.figure(figsize=(8, 6)); plt.barh(list(t25['feature'][::-1]), list(t25['coef'][::-1]))
+        plt.xlabel('LASSO Coefficient'); plt.title(f'LASSO — Top Coefficients — {target}')
+        plt.tight_layout(); plt.savefig(os.path.join(outdir, 'lasso_top_coeffs.png'), dpi=200); plt.close()
+    except Exception as e:
+        print('[Warn] LASSO coefficients plot failed:', e)
+
+    # Hotspots by beat × hour using Σ p̂
+    try:
+        # Load just the needed meta from CSV
+        meta_cols_avail = [c for c in ['beat','district','zone','tract','grid','reported_date','reported_time','from_date','from_time','offense','ibrs'] if c in pd.read_csv(CSV_PATH, nrows=0).columns]
+        meta_src = pd.read_csv(CSV_PATH, usecols=meta_cols_avail)
+        meta_test = meta_src.loc[X_test.index.intersection(meta_src.index)].copy()
+        def _to_hour(dfm):
+            if 'reported_time' in dfm.columns:
+                h = pd.to_datetime(dfm['reported_time'], errors='coerce').dt.hour
+                if h.notna().any(): return h.fillna(-1).astype(int)
+            if 'from_time' in dfm.columns:
+                h = pd.to_datetime(dfm['from_time'], errors='coerce').dt.hour
+                if h.notna().any(): return h.fillna(-1).astype(int)
+            return pd.Series([-1]*len(dfm), index=dfm.index)
+        meta_test['hour'] = _to_hour(meta_test)
+        # choose spatial key (allow override)
+        spatial_key = None
+        if SPATIAL_KEY_OVERRIDE and SPATIAL_KEY_OVERRIDE in meta_test.columns:
+            spatial_key = SPATIAL_KEY_OVERRIDE
+        else:
+            for key in ['beat','district','zone','tract','grid']:
+                if key in meta_test.columns:
+                    spatial_key = key
+                    break
+        if spatial_key is not None:
+            tmp = meta_test[[spatial_key, 'hour']].copy()
+            tmp['score_boost'] = pd.Series(test_prob_boost, index=X_test.index)
+            tmp['score_lasso'] = pd.Series(test_prob_lasso, index=X_test.index)
+            hot_b = tmp.groupby([spatial_key, 'hour'], dropna=False)['score_boost'].sum().reset_index(name=f'expected_{target}_boost')
+            hot_l = tmp.groupby([spatial_key, 'hour'], dropna=False)['score_lasso'].sum().reset_index(name=f'expected_{target}_lasso')
+            hotspots = pd.merge(hot_b, hot_l, on=[spatial_key, 'hour'], how='outer')
+            hotspots.to_csv(os.path.join(outdir, 'hotspots_by_beat_hour.csv'), index=False)
+            print(f"[Export] hotspots_by_beat_hour.csv → {outdir} (rows={len(hotspots)})")
+            try:
+                pivot = hot_b.pivot(index=spatial_key, columns='hour', values=f'expected_{target}_boost').fillna(0)
+                plt.figure(figsize=(10, 6)); plt.imshow(pivot.values, aspect='auto')
+                print(f"[Export] hotspots_heatmap_boosting.png → {outdir} (matrix {pivot.shape[0]}×{pivot.shape[1]})")
+                plt.yticks(ticks=np.arange(len(pivot.index)), labels=list(pivot.index)); plt.xticks(ticks=np.arange(24), labels=list(range(24)))
+                plt.xlabel('Hour of Day'); plt.ylabel(spatial_key.title()); plt.title(f'Expected {target} — by {spatial_key} × hour (Boosting)')
+                plt.colorbar(); plt.tight_layout(); plt.savefig(os.path.join(outdir, 'hotspots_heatmap_boosting.png'), dpi=200); plt.close()
+            except Exception as e:
+                print('[Warn] Hotspot heatmap failed:', e)
+    except Exception as e:
+        print('[Warn] Hotspot export skipped:', e)
+
+    # Beat × hour expected risk export (ranked tables) — firearm‑friendly
+    try:
+        meta_cols_avail = [c for c in ['beat','district','zone','tract','grid','reported_date','reported_time','from_date','from_time','offense','ibrs'] if c in pd.read_csv(CSV_PATH, nrows=0).columns]
+        meta_src = pd.read_csv(CSV_PATH, usecols=meta_cols_avail)
+        _meta = meta_src.loc[X_test.index.intersection(meta_src.index)].copy()
+        def _parse_hour_any(series):
+            ser = series.astype(str).str.strip()
+            h = pd.to_datetime(ser, errors='coerce', format='%H:%M:%S').dt.hour
+            miss = h.isna()
+            if miss.any():
+                h2 = pd.to_datetime(ser[miss], errors='coerce', format='%H:%M').dt.hour
+                h.loc[miss] = h2
+                miss = h.isna()
+            if miss.any():
+                def _first_two_digits_to_hour(x):
+                    if pd.isna(x): return np.nan
+                    s = ''.join(ch for ch in str(x) if ch.isdigit())
+                    if len(s)==0: return np.nan
+                    hh = int(s[:2]) if len(s)>=2 else int(s)
+                    return hh if 0<=hh<=23 else np.nan
+                h.loc[miss] = ser[miss].apply(_first_two_digits_to_hour).values
+            return h.fillna(-1).astype(int)
+        if 'reported_time' in _meta.columns:
+            _meta['hour'] = _parse_hour_any(_meta['reported_time'])
+        elif 'from_time' in _meta.columns:
+            _meta['hour'] = _parse_hour_any(_meta['from_time'])
+        else:
+            _meta['hour'] = -1
+        # choose spatial key (allow override)
+        _spatial_key = None
+        if SPATIAL_KEY_OVERRIDE and SPATIAL_KEY_OVERRIDE in _meta.columns:
+            _spatial_key = SPATIAL_KEY_OVERRIDE
+        else:
+            for key in ['beat','district','zone','tract','grid']:
+                if key in _meta.columns:
+                    _spatial_key = key
+                    break
+        if _spatial_key is not None:
+            tmp2 = _meta[[_spatial_key, 'hour']].copy()
+            tmp2['score_boost'] = pd.Series(test_prob_boost, index=X_test.index)
+            tmp2['score_lasso'] = pd.Series(test_prob_lasso, index=X_test.index)
+            agg2 = tmp2.groupby([_spatial_key,'hour'], dropna=False).agg(
+                n_calls=('score_boost','size'),
+                expected_boost=('score_boost','sum'),
+                expected_lasso=('score_lasso','sum')
+            ).reset_index()
+            agg2['avg_risk_boost'] = agg2['expected_boost'] / agg2['n_calls'].replace(0, np.nan)
+            agg2['avg_risk_lasso'] = agg2['expected_lasso'] / agg2['n_calls'].replace(0, np.nan)
+            tot2 = float(agg2['expected_boost'].sum()) + 1e-12
+            agg2['share_of_expected_boost'] = agg2['expected_boost']/tot2
+            agg2.to_csv(os.path.join(outdir, 'beat_hour_expected.csv'), index=False)
+            top20 = agg2.sort_values('expected_boost', ascending=False).head(20)
+            top20.to_csv(os.path.join(outdir,'beat_hour_expected_top20_boost.csv'), index=False)
+            print(f"[Export] beat_hour_expected.csv → {outdir} (rows={len(agg2)})")
+            print("[Top‑5 beat×hour by expected_boost]", top20.head(5))
+            if target.lower() == 'fire_arm_used_flag':
+                sorted_all = agg2.sort_values('expected_boost', ascending=False)
+                sorted_all.to_csv(os.path.join(outdir,'beat_by_risk_by_hour_firearm.csv'), index=False)
+                print(f"[Export] beat_by_risk_by_hour_firearm.csv → {outdir} (rows={len(sorted_all)})")
+    except Exception as e:
+        print('[Warn] Beat×hour expected export skipped:', e)
+
+    # Error analysis: FN clusters at Top‑10% policy
+    try:
+        thr_b_10 = float(val_caps_boost.loc[val_caps_boost['top_k_pct'] == 10, 'threshold'].values[0])
+        thr_l_10 = float(val_caps_lasso.loc[val_caps_lasso['top_k_pct'] == 10, 'threshold'].values[0])
+        fn_boost_mask = (test_prob_boost < thr_b_10) & (y_test.values == 1)
+        fn_lasso_mask = (test_prob_lasso < thr_l_10) & (y_test.values == 1)
+        if 'meta_test' in locals() and spatial_key is not None:
+            fn_meta_b = meta_test.loc[X_test.index[fn_boost_mask]] if hasattr(X_test.index, '__iter__') else meta_test.iloc[fn_boost_mask]
+            fn_meta_l = meta_test.loc[X_test.index[fn_lasso_mask]] if hasattr(X_test.index, '__iter__') else meta_test.iloc[fn_lasso_mask]
+            for model_tag, dfm in [('boosting', fn_meta_b), ('lasso', fn_meta_l)]:
+                grp_cols = [c for c in [spatial_key, 'hour', 'offense', 'ibrs'] if c in dfm.columns]
+                if grp_cols:
+                    clus = dfm.groupby(grp_cols).size().reset_index(name='fn_count').sort_values('fn_count', ascending=False)
+                    clus.to_csv(os.path.join(outdir, f'fn_clusters_{model_tag}.csv'), index=False)
+    except Exception as e:
+        print('[Warn] FN clustering skipped:', e)
+
+    # Ablations
+    if RUN_ABLATION_LOCATION:
+        loc_pat = re.compile(r"(^|_)((lat|lon|lng|x|y|beat|district|zone|tract|grid))(_|$)", re.I)
+        loc_drop = [c for c in (num_cols + cat_cols) if loc_pat.search(c)]
+        keep_cols = [c for c in (num_cols + cat_cols) if c not in set(loc_drop)]
+        pre_ab = ColumnTransformer([
+            ('num', SimpleImputer(strategy='median'), [c for c in keep_cols if c in num_cols]),
+            ('cat', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), [c for c in keep_cols if c in cat_cols])
+        ])
+        ab_pipe = Pipeline([('pre', pre_ab), ('clf', HistGradientBoostingClassifier(random_state=RANDOM_SEED))])
+        ab_pipe.fit(X_train, y_train)
+        ab_prob = ab_pipe.predict_proba(X_test)[:,1]
+        print("\n[Ablation] Drop LOCATION‑like features → Test PR‑AUC:", average_precision_score(y_test, ab_prob))
+
+    if RUN_ABLATION_TEMPORAL:
+        tmp_pat = re.compile(r"hour|hr|dayofweek|dow|weekday|month|week|date|time", re.I)
+        tmp_drop = [c for c in (num_cols + cat_cols) if tmp_pat.search(c)]
+        keep_cols = [c for c in (num_cols + cat_cols) if c not in set(tmp_drop)]
+        pre_ab = ColumnTransformer([
+            ('num', SimpleImputer(strategy='median'), [c for c in keep_cols if c in num_cols]),
+            ('cat', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), [c for c in keep_cols if c in cat_cols])
+        ])
+        ab_pipe = Pipeline([('pre', pre_ab), ('clf', HistGradientBoostingClassifier(random_state=RANDOM_SEED))])
+        ab_pipe.fit(X_train, y_train)
+        ab_prob = ab_pipe.predict_proba(X_test)[:,1]
+        print("[Ablation] Drop TEMPORAL‑like features → Test PR‑AUC:", average_precision_score(y_test, ab_prob))
+
+    # Cleanup for this target
+    del X_train, X_val, X_test; gc.collect()
+
+df_full = pd.read_csv(CSV_PATH, low_memory=False, memory_map=True)
+
+if TARGETS is None:
+    TARGETS = discover_binary_targets(df_full)
+
+for tgt in TARGETS:
+    try:
+        run_for_target(df_full, tgt)
+    except Exception as e:
+        print(f"[Error] Target '{tgt}' failed: {e}")
+
+print("\nAll done. Artifacts per target are under ./outputs/<target>/")
+
+#------------------------------------------------------------------------------------------------------------------------------------
+
+KC Crime Master Coefficient Writer (Fast, Clean)
+------------------------------------------------
+Produces decision-ready, interpretable coefficients for each binary target.
+
+What you get (under outputs/_coef/):
+  • model_summary_fast.csv  → PR-AUC, AUROC, base rate, P@5%, Capture@5%
+  • master_coefficients.csv → top coefficients per target (feature, level, coef, odds_ratio, direction)
+  • coef_top_<target>.csv   → per-target top-K coefficient table
+
+Speed + Robustness:
+  - LASSO Logistic (saga) only → fast and interpretable
+  - Leakage guard: drops offense/description/ibrs on derived targets; drops other target flags from features
+  - Drops high-cardinality categorical columns to keep OHE small
+  - Frequency/Count thresholding on OHE to limit dummy explosion
+  - Chronological split if a date exists; else stratified
+
+Tune knobs at the CONFIG block below.
+"""
+
+import os
+import re
+import gc
+import numpy as np
+import pandas as pd
+
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, MaxAbsScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.linear_model import LogisticRegression
+
+
+
+CSV_PATH = 'kcpd_2024_clean_ml_ready.csv'   # path to cleaned CSV
+OUTDIR = os.path.join('outputs', '_coef')
+os.makedirs(OUTDIR, exist_ok=True)
+
+
+TARGETS = None
+
+# Efficiency & model controls
+MAX_TRAIN_ROWS = 40000
+MAX_CAT_CARD   = 60
+OHE_MIN_FREQ   = 0.02
+OHE_MIN_COUNT  = 100
+TOP_K_FEATURES = 30
+C_LASSO        = 0.25
+MAX_ITER       = 800
+N_JOBS         = -1
+
+# Split controls
+TIME_COL_CANDS = ['reported_date','from_date','to_date','date','datetime']
+TRAIN_FRAC, VAL_FRAC, TEST_FRAC = 0.6, 0.2, 0.2
+
+# Leakage guard
+LEAKAGE_GUARD    = True
+LEAKAGE_TEXT_COLS = ['offense','description','ibrs']
+DROP_OTHER_TARGETS = True
+
+DERIVE_EXTRA_TARGETS = True
+TARGETS_DERIVED = {
+    'robbery_flag':             {'offense': ['robbery']},
+    'burglary_flag':            {'offense': ['burglary']},
+    'stolen_auto_flag':         {'offense': ['auto theft','motor vehicle theft','stolen auto','vehicle theft']},
+    'theft_from_auto_flag':     {'offense': ['theft from auto','larceny from auto']},
+    'shoplifting_flag':         {'offense': ['shoplifting']},
+    'aggravated_assault_flag':  {'offense': ['aggravated assault','agg assault']},
+    'vandalism_flag':           {'offense': ['vandalism','property damage','criminal damage']},
+    'dui_flag':                 {'offense': ['dui','dwi']},
+    'drug_narcotic_flag':       {'offense': ['narcotic','drug']},
+}
+
+
+def _to_bool01(s: pd.Series) -> pd.Series:
+    """Coerce a column to {0,1} if possible, else raise."""
+    if s.dtype == bool:
+        return s.astype(int)
+    if pd.api.types.is_numeric_dtype(s):
+        x = pd.to_numeric(s, errors='coerce')
+        vals = set(pd.unique(x.dropna()))
+        if vals <= {0, 1}:
+            return x.fillna(0).astype(int)
+        if len(vals) == 2:
+            hi = np.max(list(vals))
+            return (x == hi).astype(int)
+    low = s.astype(str).str.strip().str.lower()
+    mapping = {'yes':1,'y':1,'true':1,'t':1,'1':1,'no':0,'n':0,'false':0,'f':0,'0':0}
+    if set(low.unique()).issubset(mapping.keys()):
+        return low.map(mapping).astype(int)
+    raise ValueError('Not binary')
+
+
+def discover_binary_targets(df: pd.DataFrame) -> list:
+    out = []
+    for c in df.columns:
+        if c in ('report_no','case_number'):
+            continue
+        try:
+            y = _to_bool01(df[c])
+            if y.nunique() == 2 and 0 < y.mean() < 1:
+                out.append(c)
+        except Exception:
+            pass
+    return sorted(out)
+
+
+def derive_targets(df: pd.DataFrame) -> pd.DataFrame:
+    if not DERIVE_EXTRA_TARGETS:
+        return df
+    work = df.copy()
+    lower = {c: work[c].astype(str).str.lower() for c in LEAKAGE_TEXT_COLS if c in work.columns}
+    for new_col, rules in TARGETS_DERIVED.items():
+        if new_col in work.columns:
+            continue
+        m = pd.Series(False, index=work.index)
+        for src, kws in rules.items():
+            if src not in lower:
+                continue
+            pat = '|'.join([re.escape(k.lower()) for k in kws])
+            m = m | lower[src].str.contains(pat, na=False)
+        work[new_col] = m.astype(int)
+    return work
+
+
+def chrono_split(df: pd.DataFrame, tcol: str):
+    t = pd.to_datetime(df[tcol], errors='coerce')
+    ok = t.notna()
+    df = df.loc[ok].copy()
+    t = t.loc[ok]
+    order = np.argsort(t.values)
+    df = df.iloc[order]
+    n = len(df)
+    i_tr = int(TRAIN_FRAC*n)
+    i_va = i_tr + int(VAL_FRAC*n)
+    return df.iloc[:i_tr], df.iloc[i_tr:i_va], df.iloc[i_va:]
+
+
+def strat_split(df: pd.DataFrame, target: str):
+    train, temp = train_test_split(df, test_size=(VAL_FRAC+TEST_FRAC),
+                                   stratify=df[target], random_state=42)
+    val, test = train_test_split(temp, test_size=TEST_FRAC/(VAL_FRAC+TEST_FRAC),
+                                 stratify=temp[target], random_state=42)
+    return train, val, test
+
+
+def build_preprocessor(X_train: pd.DataFrame):
+    """Build ColumnTransformer; drop very high-cardinality categorical features for speed."""
+    num_cols = [c for c in X_train.columns if pd.api.types.is_numeric_dtype(X_train[c])]
+    cat_candidates = [c for c in X_train.columns if c not in num_cols]
+    cat_cols = [c for c in cat_candidates if X_train[c].nunique(dropna=True) <= MAX_CAT_CARD]
+
+
+    min_freq_val = OHE_MIN_COUNT if OHE_MIN_COUNT is not None else max(int(OHE_MIN_FREQ * len(X_train)), 1)
+
+    try:
+        ohe = OneHotEncoder(handle_unknown='infrequent_if_exist',
+                            min_frequency=min_freq_val,
+                            sparse_output=True, dtype=np.float32)
+    except TypeError:
+
+        ohe = OneHotEncoder(handle_unknown='ignore',
+                            sparse=True, dtype=np.float32)
+
+    pre = ColumnTransformer([
+        ('num', Pipeline([('impute', SimpleImputer(strategy='median')),
+                          ('scale', MaxAbsScaler())]), num_cols),
+        ('cat', ohe, cat_cols)
+    ], remainder='drop', sparse_threshold=1.0)
+
+    return pre, num_cols, cat_cols
+
+
+def split_ohe_name(name, cat_cols):
+    """
+    Robustly split an OHE feature name into (base_feature, level).
+    Works for patterns like 'beat_123', 'zone_North', etc.
+    """
+    for base in cat_cols:
+        prefix = f"{base}_"
+        if name.startswith(prefix):
+            return base, name[len(prefix):]
+
+    return name, ''
+
+
+def coef_table(model: LogisticRegression, feat_names: list, target: str, cat_cols: list):
+    coefs = model.coef_.ravel()
+    rows = []
+    for fname, w in zip(feat_names, coefs):
+        if fname in cat_cols:
+            base, lvl = fname, ''
+        else:
+            base, lvl = split_ohe_name(fname, cat_cols)
+        rows.append({
+            'target': target,
+            'feature': base,
+            'level': lvl,
+            'coef': float(w),
+            'odds_ratio': float(np.exp(w)),
+            'direction': '↑ risk' if w > 0 else '↓ risk',
+        })
+    dfc = pd.DataFrame(rows)
+    dfc['abs_coef'] = dfc['coef'].abs()
+    dfc['rank_abs'] = dfc.groupby('target')['abs_coef'].rank(ascending=False, method='first')
+    return dfc.sort_values(['target','rank_abs'])
+
+
+def eval_fast(y_true, p):
+    uniq = np.unique(y_true)
+    if uniq.size < 2:
+        return {'auroc': np.nan, 'prauc': np.nan, 'base': float(np.mean(y_true))}
+    return {
+        'auroc': float(roc_auc_score(y_true, p)),
+        'prauc': float(average_precision_score(y_true, p)),
+        'base':  float(np.mean(y_true))
+    }
+
+
+def prec_capture_at_k(y_true, p, ks=(0.01,0.05,0.10,0.20)):
+    out = []
+    n = len(p)
+    order = np.argsort(-p)
+    y = y_true[order]
+    tot = float(y_true.sum()) + 1e-12
+    cum = np.cumsum(y)
+    for k in ks:
+        top_n = max(1, int(np.ceil(n*k)))
+        tp = int(cum[top_n-1])
+        prec = tp / top_n
+        rec = tp / tot
+        out.append({'k_pct': int(k*100), 'precision': float(prec), 'capture': float(rec)})
+    return pd.DataFrame(out)
+
+
+
+if __name__ == '__main__':
+    # Load
+    df = pd.read_csv(CSV_PATH, low_memory=False, memory_map=True)
+
+    # Optional: derive keyword targets
+    if DERIVE_EXTRA_TARGETS:
+        df = derive_targets(df)
+
+    # Choose targets
+    if not TARGETS:
+        TARGETS = discover_binary_targets(df)
+    print('[Info] Targets to model:', TARGETS)
+
+    # Optional subsample for speed
+    if MAX_TRAIN_ROWS is not None and len(df) > MAX_TRAIN_ROWS:
+        df = df.sample(n=MAX_TRAIN_ROWS, random_state=42).sort_index()
+        print(f'[Info] Subsampled to {len(df):,} rows for speed.')
+
+    # Time column
+    tcol = next((c for c in TIME_COL_CANDS if c in df.columns), None)
+
+    # Prepare for leakage guard
+    all_bin_targets = set(TARGETS)
+
+    # Collectors
+    summary_rows = []
+    all_coef_tables = []
+
+    for target in TARGETS:
+        # Ensure binary
+        try:
+            y_full = _to_bool01(df[target])
+        except Exception:
+            print(f'[Skip] {target} is not binary.')
+            continue
+
+        # Leakage guard: drop other targets + text columns if target is derived
+        banned = set()
+        if DROP_OTHER_TARGETS:
+            banned |= {c for c in all_bin_targets if c != target and c in df.columns}
+        if LEAKAGE_GUARD and target in TARGETS_DERIVED:
+            banned |= {c for c in LEAKAGE_TEXT_COLS if c in df.columns}
+
+        X_full = df.drop(columns=sorted(list(banned | {target})), errors='ignore').copy()
+        data = X_full.copy()
+        data[target] = y_full.values
+
+        # Split
+        if tcol is not None:
+            tr, va, te = chrono_split(data, tcol)
+        else:
+            tr, va, te = strat_split(data, target)
+
+        X_tr, y_tr = tr.drop(columns=[target]), tr[target].values
+        X_va, y_va = va.drop(columns=[target]), va[target].values
+        X_te, y_te = te.drop(columns=[target]), te[target].values
+
+        # Preprocess + model
+        pre, num_cols, cat_cols = build_preprocessor(X_tr)
+        clf = LogisticRegression(
+            penalty='l1', solver='saga',
+            C=C_LASSO, max_iter=MAX_ITER,
+            n_jobs=N_JOBS, class_weight='balanced'
+        )
+        pipe = Pipeline([('pre', pre), ('clf', clf)])
+
+        # Progress logs
+        print(f"[{target}] rows train/val/test: {len(X_tr):,}/{len(X_va):,}/{len(X_te):,}")
+        print(f"[{target}] features kept — num={len(num_cols)}, cat={len(cat_cols)} (≤{MAX_CAT_CARD} unique)")
+        print(f"[{target}] fitting LASSO (C={C_LASSO}, max_iter={MAX_ITER}, min_freq={OHE_MIN_FREQ} or count {OHE_MIN_COUNT})…", flush=True)
+
+        import time
+        t0 = time.perf_counter()
+        pipe.fit(X_tr, y_tr)
+        fit_s = time.perf_counter() - t0
+        print(f"[{target}] fit done in {fit_s:.1f}s; predicting…", flush=True)
+
+        p_te = pipe.predict_proba(X_te)[:, 1]
+
+        # Metrics
+        met = eval_fast(y_te, p_te)
+        pc = prec_capture_at_k(y_te, p_te, ks=(0.01, 0.05, 0.10, 0.20))
+        p_at_5 = float(pc.loc[pc['k_pct'] == 5, 'precision'].values[0])
+        cap_at_5 = float(pc.loc[pc['k_pct'] == 5, 'capture'].values[0])
+
+        summary_rows.append({
+            'target': target,
+            'test_auroc': met['auroc'],
+            'test_prauc': met['prauc'],
+            'test_base': met['base'],
+            'p_at_5': p_at_5,
+            'cap_at_5': cap_at_5,
+            'fit_seconds': round(fit_s, 1),
+            'n_train': len(X_tr),
+            'num_features': len(num_cols),
+            'cat_features': len(cat_cols),
+        })
+
+        # Feature names in fitted order
+        fitted_pre = pipe.named_steps['pre']
+        feat_names = []
+        # numeric names
+        feat_names.extend(list(num_cols))
+        # categorical dummy names
+        ohe_names = []
+        try:
+            ohe_names = list(fitted_pre.named_transformers_['cat'].get_feature_names_out(cat_cols))
+        except Exception:
+
+            ohe_names = []
+            for c in cat_cols:
+                ohe_names.append(c)
+        feat_names.extend(ohe_names)
+
+        # Coefficients table
+        coef_df = coef_table(pipe.named_steps['clf'], feat_names, target, cat_cols)
+        all_coef_tables.append(coef_df)
+
+        # Per-target top list
+        top_df = coef_df.sort_values('rank_abs').head(TOP_K_FEATURES)
+        top_df.to_csv(os.path.join(OUTDIR, f'coef_top_{target}.csv'), index=False)
+        print(f"[OK] {target}: PR-AUC={met['prauc']:.3f}, AUROC={met['auroc']:.3f}, P@5={p_at_5:.3f}, Cap@5={cap_at_5:.3f}  |  Top-{TOP_K_FEATURES} saved")
+
+        gc.collect()
+
+    # Write outputs
+    summary = pd.DataFrame(summary_rows)
+    summary.to_csv(os.path.join(OUTDIR, 'model_summary_fast.csv'), index=False)
+    print('[Write] model_summary_fast.csv →', OUTDIR)
+
+    if all_coef_tables:
+        master_coef = pd.concat(all_coef_tables, ignore_index=True)
+        master_coef = (
+            master_coef.sort_values(['target', 'rank_abs'])
+                       .groupby('target', as_index=False)
+                       .head(TOP_K_FEATURES)
+        )
+        master_coef.to_csv(os.path.join(OUTDIR, 'master_coefficients.csv'), index=False)
+        print('[Write] master_coefficients.csv →', OUTDIR,
+              f"(targets={master_coef['target'].nunique()}, rows={len(master_coef)})")
+
+    print('\nDone. Coefficient tables and fast model summary are in', OUTDIR)
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+
+# ==== Beat × Hour (ALL beats) — numeric order, show inline, download PNGs ====
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from IPython.display import Image, display
+
+
+OUTPUTS_DIR = Path("outputs")
+MODELS = ("boost","lasso")
+HOUR_TICK_STEP = 3
+ANNOTATE_TOP = 0
+DPI = 220
+IMG_WIDTH = 1100
+AUTO_DOWNLOAD = True
+PAGINATE_BEATS = None
+
+SHOW_ALL_BEAT_LABELS = False
+MAX_YLABELS = 80
+
+ABS_VALUE_COLS = {"boost":"expected_boost", "lasso":"expected"}
+ROW_SHARE_COLS = {"boost":"expected_boost", "lasso":"expected"}
+
+def _load_df(tdir: Path) -> pd.DataFrame:
+    p = tdir/"beat_hour_expected.csv"
+    if not p.exists():
+        raise FileNotFoundError(p)
+    df = pd.read_csv(p)
+    df["beat"] = df["beat"].astype(str).str.replace(r"\.0$","",regex=True).replace({"nan":"Unknown"})
+    df["hour"] = pd.to_numeric(df["hour"], errors="coerce").fillna(-1).astype(int).clip(0,23)
+    return df
+
+def _beats_numeric_sorted(all_beats):
+    s = pd.Series(all_beats, name="beat")
+    num = pd.to_numeric(s, errors="coerce")
+    df = pd.DataFrame({"beat": s, "num": num})
+    df["is_na"] = df["num"].isna()
+    df = df.sort_values(["is_na","num","beat"], ascending=[True, True, True])
+    return df["beat"].tolist()
+
+def _make_matrix(df, beats, val_col, row_share=False):
+    w = df[df["beat"].isin(beats)][["beat","hour",val_col]].copy()
+    mat = w.pivot_table(index="beat", columns="hour", values=val_col, aggfunc="sum", fill_value=0.0)
+    for h in range(24):
+        if h not in mat.columns: mat[h] = 0.0
+    mat = mat[sorted(mat.columns)]
+    mat = mat.reindex(_beats_numeric_sorted(list(mat.index)))
+    if row_share:
+        rs = mat.sum(axis=1).replace(0, np.nan)
+        mat = (mat.T / rs).T.fillna(0.0)
+    return mat
+
+def _robust_vmax(mat):
+    vals = mat.values.ravel()
+    pos = vals[vals > 0]
+    return float(np.quantile(pos, 0.98)) if pos.size else None
+
+def _annotate(ax, mat, n_top, fmt="%.1f", color="white"):
+    if n_top <= 0: return
+    vals = mat.values
+    idx = np.argsort(vals.ravel())[::-1][:n_top]
+    r, c = np.unravel_index(idx, vals.shape)
+    for rr, cc in zip(r, c):
+        v = vals[rr, cc]
+        if v > 0:
+            ax.text(cc, rr, fmt % v, ha="center", va="center", fontsize=7, color=color)
+
+def _plot_dual(mat_abs, mat_share, title, outpath):
+    nrows = mat_abs.shape[0]
+    fig_h = max(8, 0.24 * nrows)
+    fig, axes = plt.subplots(1, 2, figsize=(16, fig_h), sharey=True)
+
+
+    vmaxA = _robust_vmax(mat_abs)
+    imA = axes[0].imshow(mat_abs.values, aspect="auto", interpolation="nearest",
+                         vmin=0, vmax=vmaxA, cmap="viridis")
+    axes[0].set_title("Absolute expected (Σ p̂)")
+    xt = np.arange(0, 24, HOUR_TICK_STEP)
+    axes[0].set_xticks(xt); axes[0].set_xticklabels([str(x) for x in xt])
+    axes[0].set_xlabel("Hour of day"); axes[0].set_ylabel("Beat")
+    _annotate(axes[0], mat_abs, ANNOTATE_TOP, fmt="%.1f")
+    cbarA = fig.colorbar(imA, ax=axes[0]); cbarA.ax.set_ylabel("Σ p̂")
+
+
+    vmaxB = _robust_vmax(mat_share)
+    imB = axes[1].imshow(mat_share.values, aspect="auto", interpolation="nearest",
+                         vmin=0, vmax=vmaxB, cmap="magma")
+    axes[1].set_title("Within-beat share")
+    axes[1].set_xticks(xt); axes[1].set_xticklabels([str(x) for x in xt])
+    axes[1].set_xlabel("Hour of day")
+    _annotate(axes[1], mat_share, ANNOTATE_TOP, fmt="%.2f")
+    cbarB = fig.colorbar(imB, ax=axes[1]); cbarB.ax.set_ylabel("Share")
+
+
+    if SHOW_ALL_BEAT_LABELS:
+        yt = np.arange(nrows)
+    else:
+        if nrows > MAX_YLABELS:
+            step = int(np.ceil(nrows / MAX_YLABELS))
+            yt = np.arange(0, nrows, step)
+        else:
+            yt = np.arange(nrows)
+    for ax in axes:
+        ax.set_yticks(yt); ax.set_yticklabels([mat_abs.index[i] for i in yt])
+
+    fig.suptitle(title, y=0.995, fontsize=12)
+    fig.tight_layout()
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, dpi=DPI)
+    plt.close(fig)
+    return outpath
+
+def _pages(full_list, page_size):
+    if page_size in (None, 0):
+        return [full_list]
+    return [full_list[i:i+page_size] for i in range(0, len(full_list), page_size)]
+
+
+png_paths = []
+targets = sorted([p.name for p in OUTPUTS_DIR.glob("*") if (OUTPUTS_DIR/p.name/"beat_hour_expected.csv").exists()])
+print("[Info] Targets:", targets)
+
+for tgt in targets:
+    tdir = OUTPUTS_DIR / tgt
+    df = _load_df(tdir)
+    all_beats_sorted = _beats_numeric_sorted(df["beat"].unique().tolist())
+    pages = _pages(all_beats_sorted, PAGINATE_BEATS)
+
+    for model in MODELS:
+        vcol = ABS_VALUE_COLS.get(model)
+        if vcol not in df.columns:
+            continue
+        for pi, beats in enumerate(pages, start=1):
+            mat_abs   = _make_matrix(df, beats, vcol, row_share=False)
+            mat_share = _make_matrix(df, beats, ROW_SHARE_COLS[model], row_share=True)
+            suffix = f"_p{pi:02d}" if len(pages) > 1 else ""
+            title  = f"{tgt} — Beat × Hour ({model.capitalize()}, ALL beats; page {pi}/{len(pages)})" if len(pages)>1 \
+                     else f"{tgt} — Beat × Hour ({model.capitalize()}, ALL beats)"
+            outpng = tdir / f"heatmap_dual_{model}_ALL{suffix}.png"
+            p = _plot_dual(mat_abs, mat_share, title, outpng)
+            png_paths.append(str(p))
+            print(f"[Saved] {p}   rows={mat_abs.shape[0]}")
+
+
+print("\n[Preview inline]")
+for p in png_paths:
+    print("•", p)
+    display(Image(filename=p, width=IMG_WIDTH))
+
+
+if AUTO_DOWNLOAD:
+    try:
+        from google.colab import files as colab_files
+        for p in png_paths:
+            colab_files.download(p)
+        print("\n[Downloads triggered] If a file didn’t prompt, open the Files pane and click it.")
+    except Exception as e:
+        print("[Note] Auto-download not available here:", e)
+
+
+#-----------------------------------------------------------------------------------------------------------------------------
+
+# ==== EXTRA: LASSO predicted-probability (mean p̂) heatmaps ====
+
+def _resolve_col(candidates, cols):
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
+
+# Try multiple possible column names, be tolerant to naming
+AVG_VALUE_COL_CANDIDATES = {
+    "lasso": ["avg_risk_lasso", "mean_proba_lasso", "avg_lasso", "mean_lasso", "avg_risk"],
+    "boost": ["avg_risk_boost", "mean_proba_boost", "avg_boost", "mean_boost", "avg_risk"],
+}
+
+def _plot_single(mat, title, outpath, cmap="inferno", cbar_label="mean p̂"):
+    nrows = mat.shape[0]
+    fig_h = max(8, 0.24 * nrows)
+    fig, ax = plt.subplots(1, 1, figsize=(10, fig_h))
+    vmax = _robust_vmax(mat)
+    im = ax.imshow(mat.values, aspect="auto", interpolation="nearest",
+                   vmin=0, vmax=vmax, cmap=cmap)
+    xt = np.arange(0, 24, HOUR_TICK_STEP)
+    ax.set_xticks(xt); ax.set_xticklabels([str(x) for x in xt])
+    ax.set_xlabel("Hour of day"); ax.set_ylabel("Beat")
+    if SHOW_ALL_BEAT_LABELS:
+        yt = np.arange(nrows)
+    else:
+        yt = np.arange(0, nrows, max(1, int(np.ceil(nrows / MAX_YLABELS))))
+    ax.set_yticks(yt); ax.set_yticklabels([mat.index[i] for i in yt])
+    cbar = fig.colorbar(im, ax=ax); cbar.ax.set_ylabel(cbar_label)
+    ax.set_title(title)
+    fig.tight_layout()
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, dpi=DPI)
+    plt.close(fig)
+    return outpath
+
+# Generate LASSO "predicted" (mean p̂) heatmaps per target
+for tgt in targets:
+    tdir = OUTPUTS_DIR / tgt
+    df = _load_df(tdir)
+
+    # pick an avg-probability column for lasso (try several common names)
+    avg_col = _resolve_col(AVG_VALUE_COL_CANDIDATES["lasso"], df.columns)
+    if avg_col is None:
+        print(f"[Skip] No LASSO average-risk column found in {tdir} "
+              f"(looked for {AVG_VALUE_COL_CANDIDATES['lasso']})")
+        continue
+
+    all_beats_sorted = _beats_numeric_sorted(df["beat"].unique().tolist())
+    pages = _pages(all_beats_sorted, PAGINATE_BEATS)
+
+    for pi, beats in enumerate(pages, start=1):
+        mat_avg = _make_matrix(df, beats, avg_col, row_share=False)
+        suffix = f"_p{pi:02d}" if len(pages) > 1 else ""
+        title  = (f"{tgt} — Beat × Hour (LASSO mean p̂, ALL beats; page {pi}/{len(pages)})"
+                  if len(pages)>1 else f"{tgt} — Beat × Hour (LASSO mean p̂, ALL beats)")
+        outpng = tdir / f"heatmap_pred_lasso_ALL{suffix}.png"
+        p = _plot_single(mat_avg, title, outpng, cmap="magma", cbar_label="Average risk (mean p̂)")
+        png_paths.append(str(p))
+        print(f"[Saved] {p}   rows={mat_avg.shape[0]}")
+
+# Preview inline + optional downloads (reuse your existing logic)
+print("\n[Preview inline — added LASSO predicted heatmaps]")
+for p in png_paths:
+    if "heatmap_pred_lasso" in p:
+        print("•", p)
+        display(Image(filename=p, width=IMG_WIDTH))
+
+if AUTO_DOWNLOAD:
+    try:
+        from google.colab import files as colab_files
+        for p in png_paths:
+            if "heatmap_pred_lasso" in p:
+                colab_files.download(p)
+        print("\n[Downloads triggered for LASSO predicted heatmaps]")
+    except Exception as e:
+        print("[Note] Auto-download not available here:", e)
+
+
+#------------------------------------------------------------------------------------------------------------------------------------
+
+import os, glob, time
+import pandas as pd
+from IPython.display import display
+
+
+coef_dir    = 'outputs/_coef'
+master_dir  = 'outputs/_master'
+master2_dir = 'outputs/_master2'
+
+
+candidates = [
+
+    os.path.join(coef_dir, 'model_summary_fast.csv'),
+    os.path.join(coef_dir, 'master_coefficients.csv'),
+]
+
+candidates += sorted(glob.glob(os.path.join(coef_dir, 'coef_top_*.csv')))
+
+
+candidates += [
+    os.path.join(master_dir,  'model_stats_boosting.csv'),
+    os.path.join(master_dir,  'model_stats_lasso.csv'),
+    os.path.join(master_dir,  'risk_cube_boost.csv'),
+    os.path.join(master_dir,  'risk_cube_lasso.csv'),
+    os.path.join(master_dir,  'trends_master_boost.csv'),
+    os.path.join(master_dir,  'trends_master_lasso.csv'),
+    os.path.join(master2_dir, 'model_stats_boosting.csv'),
+    os.path.join(master2_dir, 'model_stats_lasso.csv'),
+    os.path.join(master2_dir, 'risk_cube_boost.csv'),
+    os.path.join(master2_dir, 'risk_cube_lasso.csv'),
+    os.path.join(master2_dir, 'trends_master_boost.csv'),
+    os.path.join(master2_dir, 'trends_master_lasso.csv'),
+]
+
+
+seen = set()
+files_to_get = []
+for p in candidates:
+    if p and os.path.exists(p) and p not in seen:
+        files_to_get.append(p)
+        seen.add(p)
+
+
+def show_head(path, n=10):
+    try:
+        df = pd.read_csv(path)
+        print(f"\n[Loaded] {path}  shape={df.shape}")
+        display(df.head(n))
+    except Exception as e:
+        print(f"[Warn] Could not read {path}: {e}")
+
+print("=== Previewing key outputs ===")
+if any(os.path.basename(p) == 'model_summary_fast.csv' for p in files_to_get):
+    show_head(os.path.join(coef_dir, 'model_summary_fast.csv'), n=20)
+if any(os.path.basename(p) == 'master_coefficients.csv' for p in files_to_get):
+    show_head(os.path.join(coef_dir, 'master_coefficients.csv'), n=30)
+
+print("\n=== All files to download (individually) ===")
+for p in files_to_get:
+    print("•", p)
+
+
+try:
+    from google.colab import files as gfiles
+    print("\nAttempting individual downloads... (allow pop-ups)")
+    for p in files_to_get:
+        print("Downloading:", p)
+        gfiles.download(p)
+        time.sleep(0.6)
+    print("\n[OK] If some downloads were blocked, re-run this cell or download from the Files pane on the left.")
+except Exception:
+    print("\n[Info] Not running in Google Colab (or downloads not permitted).")
+    print("You can right-click and download each file from the file browser in this environment:")
+    for p in files_to_get:
+        print(" -", p)
+
+
+#--------------------------------------------------------------------------------------------------------------------------------
+
+Not all code was used in the final product
+
+Output report and presentation
+Presi
+https://docs.google.com/presentation/d/1ze4XC4l8bqGljI5-KPFMIji9eYoH8oMDQAB6y9eD_yU/edit?slide=id.g3a3221ab9f6_0_7#slide=id.g3a3221ab9f6_0_7
+Report
+https://docs.google.com/document/d/1b84hx6sEDhCdoY2YtfAhILiZkMOZcziBSYpTnz8yEjQ/edit?tab=t.0
+#-------------------------------------------------------------------------------------------------------------------------------
