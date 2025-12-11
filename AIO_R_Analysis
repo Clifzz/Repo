@@ -1,0 +1,866 @@
+# not all code and results were used in final product
+
+# Load libraries
+library(tidyverse)
+library(lubridate)
+
+# Read data
+crime <- read.csv("KCPD_Crime_Data_2024_20250918.csv")
+
+# Convert date fields
+crime$Reported_Date <- mdy(crime$Reported_Date)
+
+# 1. Crimes by day (time series line plot)
+crime %>%
+  count(Reported_Date) %>%
+  ggplot(aes(x = Reported_Date, y = n)) +
+  geom_line(color = "steelblue") +
+  labs(title = "Daily Reported Crimes", x = "Date", y = "Number of Crimes")
+
+# 2. Crimes by offense type (top 10 bar chart)
+crime %>%
+  count(Offense, sort = TRUE) %>%
+  top_n(10) %>%
+  ggplot(aes(x = reorder(Offense, n), y = n)) +
+  geom_col(fill = "firebrick") +
+  coord_flip() +
+  labs(title = "Top 10 Offense Types", x = "Offense", y = "Count")
+
+# 3. Crime by hour of day (heatmap style)
+crime %>%
+  mutate(hour = hour(hms(Reported_Time))) %>%
+  count(hour) %>%
+  ggplot(aes(x = hour, y = n)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Crimes by Hour of Day", x = "Hour", y = "Count")
+
+# 4. Offense by area (stacked bar)
+crime %>%
+  count(Area, Offense) %>%
+  group_by(Area) %>%
+  top_n(5, n) %>%
+  ggplot(aes(x = Area, y = n, fill = Offense)) +
+  geom_bar(stat="identity") +
+  labs(title = "Top Offenses by Area", x = "Police Area", y = "Count")
+
+# 5. Firearm involvement by race (bar chart)
+crime %>%
+  filter(!is.na(Race)) %>%
+  count(Race, `Fire.Arm.Used.Flag`) %>%
+  ggplot(aes(x = Race, y = n, fill = Fire.Arm.Used.Flag)) +
+  geom_col(position = "dodge") +
+  labs(title = "Firearm-Related Crimes by Race", x = "Race", y = "Count")
+
+library(tidyverse)
+library(lubridate)
+
+# Make a binary flag for stolen auto
+crime <- crime %>%
+  mutate(
+    StolenAuto = ifelse(Offense == "Stolen Auto", 1, 0),
+    Reported_Date = mdy(Reported_Date),
+    hour = hour(hms(Reported_Time))
+  )
+
+# 1. Car thefts vs other crimes by hour of day
+crime %>%
+  group_by(hour, StolenAuto) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = hour, y = count, fill = factor(StolenAuto))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "firebrick"),
+                    labels = c("Other Crimes", "Stolen Auto")) +
+  labs(title = "Crimes by Hour (Car Theft vs Others)",
+       x = "Hour of Day", y = "Count", fill = "Crime Type")
+
+# 2. Car thefts by area vs other crimes
+crime %>%
+  group_by(Area, StolenAuto) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Area, y = count, fill = factor(StolenAuto))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "firebrick")) +
+  labs(title = "Car Theft vs Other Crimes by Police Area",
+       x = "Area", y = "Count", fill = "Crime Type")
+
+# 3. Car theft by age group (Age_Range)
+crime %>%
+  filter(!is.na(Age_Range)) %>%
+  group_by(Age_Range, StolenAuto) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Age_Range, y = count, fill = factor(StolenAuto))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "firebrick")) +
+  labs(title = "Car Theft vs Other Crimes by Age Range",
+       x = "Age Range", y = "Count", fill = "Crime Type")
+
+# 4. Car theft by race
+crime %>%
+  filter(!is.na(Race)) %>%
+  group_by(Race, StolenAuto) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Race, y = count, fill = factor(StolenAuto))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "firebrick")) +
+  labs(title = "Car Theft vs Other Crimes by Race",
+       x = "Race", y = "Count", fill = "Crime Type")
+
+# 5. Car theft by day of week
+crime %>%
+  mutate(weekday = wday(Reported_Date, label = TRUE)) %>%
+  group_by(weekday, StolenAuto) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = weekday, y = count, fill = factor(StolenAuto))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "firebrick")) +
+  labs(title = "Car Theft vs Other Crimes by Day of Week",
+       x = "Day of Week", y = "Count", fill = "Crime Type")
+
+library(tidyverse)
+library(lubridate)
+
+# Create a binary flag for drug-related offenses
+crime <- crime %>%
+  mutate(
+    DrugCrime = ifelse(str_detect(tolower(Offense), "drug"), 1, 0),
+    Reported_Date = mdy(Reported_Date),
+    hour = hour(hms(Reported_Time))
+  )
+
+# 1. Drug crimes vs other crimes by hour of day
+crime %>%
+  group_by(hour, DrugCrime) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = hour, y = count, fill = factor(DrugCrime))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "darkgreen"),
+                    labels = c("Other Crimes", "Drug Crimes")) +
+  labs(title = "Crimes by Hour (Drug vs Others)",
+       x = "Hour of Day", y = "Count", fill = "Crime Type")
+
+# 2. Drug crimes by police area
+crime %>%
+  group_by(Area, DrugCrime) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Area, y = count, fill = factor(DrugCrime))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "darkgreen")) +
+  labs(title = "Drug Crimes vs Other Crimes by Area",
+       x = "Area", y = "Count", fill = "Crime Type")
+
+# 3. Drug crimes by age range
+crime %>%
+  filter(!is.na(Age_Range)) %>%
+  group_by(Age_Range, DrugCrime) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Age_Range, y = count, fill = factor(DrugCrime))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "darkgreen")) +
+  labs(title = "Drug Crimes vs Other Crimes by Age Range",
+       x = "Age Range", y = "Count", fill = "Crime Type")
+
+# 4. Drug crimes by race
+crime %>%
+  filter(!is.na(Race)) %>%
+  group_by(Race, DrugCrime) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = Race, y = count, fill = factor(DrugCrime))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "darkgreen")) +
+  labs(title = "Drug Crimes vs Other Crimes by Race",
+       x = "Race", y = "Count", fill = "Crime Type")
+
+# 5. Drug crimes by day of week
+crime %>%
+  mutate(weekday = wday(Reported_Date, label = TRUE)) %>%
+  group_by(weekday, DrugCrime) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = weekday, y = count, fill = factor(DrugCrime))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray70", "darkgreen")) +
+  labs(title = "Drug Crimes vs Other Crimes by Day of Week",
+       x = "Day of Week", y = "Count", fill = "Crime Type")
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+
+# Clean column names to make them R-friendly
+crime <- read.csv("KCPD_Crime_Data_2024_20250918.csv") %>%
+  janitor::clean_names()
+
+# Check names
+names(crime)
+
+library(dplyr)
+library(stringr)
+
+crime <- crime %>%
+  mutate(
+    # Car theft flag
+    stolen_auto = ifelse(str_detect(tolower(offense), "stolen auto"), 1, 0),
+    
+    # Drug crime flag (catches "drug" anywhere in offense)
+    drug_crime = ifelse(str_detect(tolower(offense), "drug"), 1, 0),
+    
+    # Assault flag (optional example)
+    assault = ifelse(str_detect(tolower(offense), "assault"), 1, 0)
+  )
+
+table(crime$stolen_auto)
+table(crime$drug_crime)
+
+
+
+# ---- 0) Setup ----
+packages <- c(
+  "tidyverse","readr","janitor","scales","yardstick",
+  "pROC","PRROC","gt","glue"
+)
+invisible(lapply(setNames(packages, packages), function(p) if(!require(p, character.only=TRUE)) install.packages(p)))
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Paths (edit if needed)
+fire_dir <- "outputs/fire_arm_used_flag"
+dv_dir   <- "outputs/dvflag"
+dir.create("figs", showWarnings = FALSE)
+
+# Helper: safe read with nice names
+read_clean <- function(path) readr::read_csv(path, show_col_types = FALSE) |> janitor::clean_names()
+
+# ---- 1) Workload–Capture & Precision@K (needs a predictions CSV) ----
+# Expect a CSV per target with columns: y (0/1) and p_hat (probability). 
+# If your column names differ, rename below.
+
+load_preds <- function(dir){
+  # Try a few likely filenames; change to your actual file if needed.
+  cand <- c("predictions_test.csv","test_predictions.csv","preds_test.csv")
+  f <- file.path(dir, cand[file.exists(file.path(dir, cand))][1])
+  if (is.na(f) || f == "") stop(glue("No predictions file found in {dir}. Add one named {paste(cand, collapse=', ')}."))
+  df <- read_clean(f)
+  # Standardize expected names
+  nm <- names(df)
+  if (!"y" %in% nm)  { ycol <- nm[which(nm %in% c("label","target","y_true","truth"))[1]]; df <- df |> rename(y={{ycol}}) }
+  if (!"p_hat" %in% nm){ pcol <- nm[which(nm %in% c("p","prob","score","pred","pred_prob"))[1]]; df <- df |> rename(p_hat={{pcol}}) }
+  df |> mutate(y = as.integer(y))
+}
+
+workload_curves <- function(df, ks = seq(0.01, 0.20, by = 0.01)){
+  df <- df |> arrange(desc(p_hat)) |> mutate(rank=row_number(), n=n())
+  map_df(ks, function(k){
+    top_n <- ceiling(k * nrow(df))
+    flagged <- df |> slice(1:top_n)
+    tp <- sum(flagged$y==1); fp <- sum(flagged$y==0)
+    p  <- sum(df$y==1)
+    tibble(
+      top_k = k,
+      capture = tp / p,
+      precision = tp / (tp + fp),
+      recall = tp / p # same as capture
+    )
+  })
+}
+
+plot_workload <- function(curves, title){
+  ggplot(curves, aes(top_k, capture)) +
+    geom_line(size=1.2) + geom_point() +
+    scale_x_continuous(labels = percent_format(accuracy = 1)) +
+    scale_y_continuous(labels = percent_format(accuracy = 1)) +
+    labs(title = glue("Workload vs Capture — {title}"),
+         x="Workload (Top-k% flagged)", y="Capture (Recall)") +
+    theme_minimal(base_size = 12)
+}
+
+plot_p_at_k <- function(curves, title){
+  ggplot(curves, aes(x = factor(round(top_k*100)), y = precision)) +
+    geom_col() +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0,1)) +
+    labs(title = glue("Precision@k — {title}"),
+         x="Top-k (%)", y="Precision") +
+    theme_minimal(base_size = 12)
+}
+
+# Firearm
+try({
+  preds_fire <- load_preds(fire_dir)
+  curves_fire <- workload_curves(preds_fire)
+  ggsave("figs/fire_workload_capture.png", plot_workload(curves_fire, "Firearm"), width=6.5, height=4.2, dpi=300)
+  ggsave("figs/fire_precision_at_k.png", plot_p_at_k(curves_fire, "Firearm"), width=6.0, height=4.2, dpi=300)
+}, silent = TRUE)
+
+# DV
+try({
+  preds_dv <- load_preds(dv_dir)
+  curves_dv <- workload_curves(preds_dv)
+  ggsave("figs/dv_workload_capture.png", plot_workload(curves_dv, "DV"), width=6.5, height=4.2, dpi=300)
+  ggsave("figs/dv_precision_at_k.png", plot_p_at_k(curves_dv, "DV"), width=6.0, height=4.2, dpi=300)
+}, silent = TRUE)
+
+# ---- 2) Reliability / Calibration (binning) ----
+calibration_df <- function(df, bins = 20){
+  df |>
+    mutate(bin = cut(p_hat, breaks = seq(0,1,length.out=bins+1), include.lowest=TRUE)) |>
+    group_by(bin) |>
+    summarise(
+      mean_pred = mean(p_hat),
+      obs_rate  = mean(y),
+      n = n(),
+      .groups="drop"
+    )
+}
+
+plot_calibration <- function(cdf, title){
+  ggplot(cdf, aes(mean_pred, obs_rate, size = n)) +
+    geom_point(alpha=0.8) +
+    geom_abline(lty=2) +
+    scale_x_continuous(labels = percent_format(accuracy = 1), limits = c(0,1)) +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0,1)) +
+    labs(title = glue("Reliability Plot — {title}"),
+         x="Mean predicted probability", y="Observed rate") +
+    theme_minimal(base_size = 12) + guides(size="none")
+}
+
+try({
+  ggsave("figs/fire_calibration.png", plot_calibration(calibration_df(preds_fire), "Firearm"), width=6, height=5, dpi=300)
+  ggsave("figs/dv_calibration.png",   plot_calibration(calibration_df(preds_dv), "DV"),       width=6, height=5, dpi=300)
+}, silent = TRUE)
+
+# ---- 3) Threshold tuner (by probability cut) ----
+threshold_sweep <- function(df, cuts = seq(0.1, 0.9, by = 0.05)){
+  map_df(cuts, function(t){
+    df |> mutate(.pred_class = as.factor(if_else(p_hat >= t, 1, 0))) |>
+      yardstick::metrics(truth = factor(y), estimate = .pred_class) |>
+      mutate(threshold = t) |>
+      bind_rows(
+        df |> mutate(.pred = p_hat) |>
+          yardstick::pr_auc(truth = factor(y), .pred) |>
+          mutate(threshold = t)
+      )
+  })
+}
+
+
+try(write_csv(threshold_sweep(preds_fire), "figs/fire_threshold_tuner.csv"), silent = TRUE)
+try(write_csv(threshold_sweep(preds_dv),   "figs/dv_threshold_tuner.csv"),   silent = TRUE)
+
+#4) Beat × Hour heatmaps 
+make_heatmap <- function(path, title, fill_col = "expected_boost"){
+  df <- read_clean(path)
+  # Ensure 'beat' and 'hour' exist
+  stopifnot(all(c("beat","hour") %in% names(df)))
+  df <- df |>
+    mutate(
+      beat = factor(beat) |> fct_inorder(),
+      hour = as.integer(hour)
+    )
+  ggplot(df, aes(x = hour, y = fct_reorder(beat, as.numeric(as.character(beat))), fill = !!sym(fill_col))) +
+    geom_tile() +
+    scale_x_continuous(breaks = seq(0,23,by=3)) +
+    labs(title = title, x="Hour of day", y="Beat", fill=fill_col) +
+    theme_minimal(base_size = 12)
+}
+
+# Firearm
+hf <- file.path(fire_dir, "beat_hour_expected.csv")
+if (file.exists(hf)) ggsave("figs/fire_heatmap_expected.png",
+                            make_heatmap(hf, "Firearm — Expected Incidents (Beat×Hour)", "expected_boost"),
+                            width=7.2, height=8.5, dpi=300)
+
+# DV
+hd <- file.path(dv_dir, "beat_hour_expected.csv")
+if (file.exists(hd)) ggsave("figs/dv_heatmap_expected.png",
+                            make_heatmap(hd, "DV — Expected Incidents (Beat×Hour)", "expected_boost"),
+                            width=7.2, height=8.5, dpi=300)
+
+# 5) Top-N hotspot table 
+make_hot_table <- function(path, title, n = 10){
+  df <- read_clean(path) |>
+    arrange(desc(expected_boost)) |>
+    slice_head(n = n) |>
+    mutate(rank = row_number()) |>
+    select(rank, beat, hour, n_calls, expected_boost, avg_risk_boost)
+  gt(df) |>
+    tab_header(title = md(glue("**Top {n} Hotspots — {title}**"))) |>
+    fmt_number(columns = c(expected_boost, avg_risk_boost), decimals = 3)
+}
+
+if (file.exists(hf)) gtsave(make_hot_table(hf, "Firearm"), "figs/fire_hotspots_top10.png")
+if (file.exists(hd)) gtsave(make_hot_table(hd, "DV"),      "figs/dv_hotspots_top10.png")
+
+#Monthly Drift If Date Column
+maybe_drift <- function(df, date_col = NULL, title = ""){
+  nm <- names(df)
+  dcol <- if (!is.null(date_col)) date_col else nm[which(nm %in% c("reported_date","date","reported_datetime"))[1]]
+  if (is.na(dcol) || dcol == "") return(invisible(NULL))
+  df |>
+    mutate(month = lubridate::floor_date(lubridate::as_date(!!sym(dcol)), "month")) |>
+    group_by(month) |>
+    summarise(base_rate = mean(y), .groups="drop") |>
+    ggplot(aes(month, base_rate)) +
+    geom_line(size=1.1) + geom_point() +
+    scale_y_continuous(labels = percent_format()) +
+    labs(title = glue("Base-Rate Drift — {title}"), x=NULL, y="Positive rate") +
+    theme_minimal(base_size = 12)
+}
+
+
+
+
+
+
+
+
+
+
+
+# ---- Setup ----
+packages <- c("tidyverse","janitor","forcats","lubridate","glue","stringr")
+invisible(lapply(setNames(packages, packages), function(p) if(!require(p, character.only=TRUE)) install.packages(p)))
+invisible(lapply(packages, library, character.only = TRUE))
+dir.create("figs/heatmaps", recursive = TRUE, showWarnings = FALSE)
+
+# Use YOUR file 
+data_path <- "C:/Users/Cliff/Desktop/R DATA/kcpd_2024_clean_ml_ready (1).csv"
+stopifnot(file.exists(data_path))
+
+
+
+df <- readr::read_csv(data_path, show_col_types = FALSE) |> janitor::clean_names()
+
+# Hard-set the columns we want
+beat_col  <- if ("beat" %in% names(df)) "beat" else stop("No 'beat' column found.")
+hour_col  <- dplyr::case_when(
+  "reported_datetime_hour" %in% names(df) ~ "reported_datetime_hour",
+  "hour" %in% names(df) ~ "hour",
+  TRUE ~ NA_character_
+)
+if (is.na(hour_col)) {
+  dt_guess <- intersect(names(df), c("reported_datetime","from_datetime","to_datetime"))
+  if (length(dt_guess)==0) stop("No hour column found and no datetime to derive from.")
+  df <- df |> mutate(reported_datetime_hour = lubridate::hour(lubridate::ymd_hms(.data[[dt_guess[1]]], quiet = TRUE)))
+  hour_col <- "reported_datetime_hour"
+}
+crime_col <- dplyr::case_when(
+  "offense" %in% names(df) ~ "offense",
+  "description" %in% names(df) ~ "description",
+  "ibrs" %in% names(df) ~ "ibrs",
+  TRUE ~ NA_character_
+)
+if (is.na(crime_col)) stop("No crime label column found (expected one of: offense, description, ibrs).")
+
+# Trim to what we need
+df_small <- df |>
+  transmute(
+    beat  = as.character(.data[[beat_col]]),
+    hour  = as.integer(.data[[hour_col]]),
+    crime = as.character(.data[[crime_col]])
+  ) |>
+  filter(!is.na(beat), !is.na(hour), dplyr::between(hour, 0, 23), !is.na(crime))
+
+# Order beats numerically 
+num_beat <- readr::parse_number(df_small$beat)
+df_small <- df_small |>
+  mutate(beat = forcats::fct_reorder(beat, num_beat, .fun = min, .na_rm = TRUE))
+
+# Aggregate counts & fill the grid 
+agg <- df_small |>
+  count(crime, beat, hour, name = "n") |>
+  group_by(crime) |>
+  tidyr::complete(beat, hour = 0:23, fill = list(n = 0)) |>
+  ungroup()
+
+# Faceted heatmap for Top-N crimes 
+top_n <- 8
+top_crimes <- agg |>
+  group_by(crime) |>
+  summarise(total = sum(n), .groups="drop") |>
+  arrange(desc(total)) |>
+  slice_head(n = top_n) |>
+  pull(crime)
+
+agg_top <- agg |> filter(crime %in% top_crimes)
+
+p_facets <- ggplot(agg_top, aes(x = hour, y = beat, fill = n)) +
+  geom_tile() +
+  scale_x_continuous(breaks = seq(0, 23, by = 3)) +
+  scale_fill_viridis_c(option = "C", trans = "sqrt") +
+  facet_wrap(~ crime, ncol = 2, scales = "free_y") +
+  labs(
+    title = glue("Heatmap — Beat × Hour × Crime (Top {top_n} by volume)"),
+    x = "Hour of day", y = "Beat", fill = "Count"
+  ) +
+  theme_minimal(base_size = 12)
+
+print(p_facets)
+ggsave("figs/heatmaps/heatmap_beat_hour_by_crime_top8.png", p_facets, width = 10, height = 12, dpi = 300)
+
+# One PNG per crime (all levels) 
+make_one <- function(cr) {
+  d <- agg |> filter(crime == cr)
+  p <- ggplot(d, aes(x = hour, y = beat, fill = n)) +
+    geom_tile() +
+    scale_x_continuous(breaks = seq(0, 23, by = 3)) +
+    scale_fill_viridis_c(option = "C", trans = "sqrt") +
+    labs(title = glue("Heatmap — Beat × Hour — {cr}"),
+         x = "Hour of day", y = "Beat", fill = "Count") +
+    theme_minimal(base_size = 12)
+  print(p)
+  ggsave(glue("figs/heatmaps/heatmap_beat_hour_{gsub('[^A-Za-z0-9]+','_',cr)}.png"),
+         p, width = 7.5, height = 9.5, dpi = 300)
+}
+unique(agg$crime) |> purrr::walk(make_one)
+
+
+agg_rate <- agg |>
+  group_by(crime, beat) |>
+  mutate(rate_within_beat = n / sum(n)) |>
+  ungroup()
+
+p_rate <- ggplot(agg_rate |> filter(crime %in% top_crimes),
+                 aes(x = hour, y = beat, fill = rate_within_beat)) +
+  geom_tile() +
+  scale_x_continuous(breaks = seq(0,23,by=3)) +
+  scale_fill_viridis_c(option = "C", labels = scales::percent_format(accuracy = 1)) +
+  facet_wrap(~ crime, ncol = 2, scales = "free_y") +
+  labs(title = glue("Heatmap (Normalized within Beat) — Top {top_n} Crimes"),
+       x = "Hour of day", y = "Beat", fill = "Share") +
+  theme_minimal(base_size = 12)
+
+print(p_rate)
+ggsave("figs/heatmaps/heatmap_beat_hour_by_crime_top8_RATE.png", p_rate, width = 10, height = 12, dpi = 300)
+
+
+suspect <- stringr::str_subset(unique(agg$crime), regex("motor.*vehicle.*theft|stolen.*auto|auto.*theft", ignore_case = TRUE))
+if (length(suspect) > 0) make_one(suspect[1])
+
+
+beat_levels <- df_small |>
+  dplyr::summarise(num_beat = suppressWarnings(min(readr::parse_number(beat), na.rm = TRUE)), .by = beat) |>
+  dplyr::mutate(
+    # when a beat has no digits at all, num_beat becomes Inf 
+    num_beat = dplyr::if_else(is.infinite(num_beat) | is.na(num_beat), Inf, num_beat)
+  ) |>
+  dplyr::arrange(num_beat, beat) |>
+  dplyr::pull(beat)
+
+df_small <- df_small |>
+  dplyr::mutate(beat = factor(beat, levels = beat_levels))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# robust numeric-first ordering of beats 
+beat_levels <- df_small |>
+  dplyr::summarise(num_beat = suppressWarnings(min(readr::parse_number(beat), na.rm = TRUE)), .by = beat) |>
+  dplyr::mutate(
+    # when a beat has no digits at all, num_beat becomes Inf 
+    num_beat = dplyr::if_else(is.infinite(num_beat) | is.na(num_beat), Inf, num_beat)
+  ) |>
+  dplyr::arrange(num_beat, beat) |>
+  dplyr::pull(beat)
+
+df_small <- df_small |>
+  dplyr::mutate(beat = factor(beat, levels = beat_levels))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---- Setup ----
+packages <- c("tidyverse","janitor","lubridate","forcats","glue","stringr","scales")
+invisible(lapply(setNames(packages, packages), function(p) if(!require(p, character.only=TRUE)) install.packages(p)))
+invisible(lapply(packages, library, character.only = TRUE))
+dir.create("figs/kc_general", recursive = TRUE, showWarnings = FALSE)
+
+# ---- Load general data ----
+data_path <- "C:/Users/Cliff/Desktop/R DATA/kcpd_2024_clean_ml_ready (1).csv"  # <-- edit if needed
+stopifnot(file.exists(data_path))
+df <- readr::read_csv(data_path, show_col_types = FALSE) |> janitor::clean_names()
+
+# ---- Column detection ----
+# Offense label
+off_col <- c("offense","description","ibrs","offense_category","offense_group") |> intersect(names(df)) |> purrr::pluck(1)
+stopifnot(!is.null(off_col))
+# Division / area (e.g., CPD/EPD/MPD/SPD/SCP/NPD)
+area_col <- c("police_area","division","patrol_division","area") |> intersect(names(df)) |> purrr::pluck(1)
+stopifnot(!is.null(area_col))
+# Beat
+beat_col <- c("beat","patrol_beat","area_beat") |> intersect(names(df)) |> purrr::pluck(1)
+stopifnot(!is.null(beat_col))
+# Hour (derive if needed)
+if (!"hour" %in% names(df)) {
+  dt_guess <- c("reported_datetime","from_datetime","to_datetime","call_datetime") |> intersect(names(df)) |> purrr::pluck(1, .default = NA_character_)
+  if (is.na(dt_guess)) stop("No hour column and no datetime column found.")
+  df <- df |> mutate(hour = lubridate::hour(lubridate::ymd_hms(.data[[dt_guess]], quiet = TRUE)))
+}
+
+# ---- Filter to stolen-auto incidents (flexible label match) ----
+stolen_pat <- regex("motor\\s*vehicle\\s*theft|stolen\\s*auto|auto\\s*theft", ignore_case = TRUE)
+df_sa <- df |> filter(str_detect(.data[[off_col]], stolen_pat))
+
+# ---- Create a clean Day/Night indicator (or use lighting column if present) ----
+lighting_col <- c("lighting","light_condition","illumination") |> intersect(names(df)) |> purrr::pluck(1, .default = NA_character_)
+if (!is.na(lighting_col)) {
+  df_sa <- df_sa |>
+    mutate(light = fct_lump_n(str_to_title(as.character(.data[[lighting_col]])), n = 4)) |>
+    mutate(light = fct_collapse(light,
+                                Day   = c("Daylight","Day","Sunny"),
+                                Night = c("Dark","Darkness","Night","Dark - Lighted","Dark - Not Lighted"),
+                                Other = setdiff(levels(light), c("Day","Daylight","Sunny","Dark","Darkness","Night","Dark - Lighted","Dark - Not Lighted"))
+    ))
+} else {
+  df_sa <- df_sa |>
+    mutate(light = if_else(hour %in% c(20:23,0:5), "Night", "Day")) |> 
+    mutate(light = factor(light, levels = c("Day","Night")))
+}
+
+# ---- 1) 100% stacked bars: Stolen Auto by Division × Lighting ----
+p1 <- df_sa |>
+  count(!!sym(area_col), light, name = "n") |>
+  group_by(!!sym(area_col)) |>
+  mutate(pct = n/sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = .data[[area_col]], y = pct, fill = light)) +
+  geom_col() +
+  geom_text(aes(label = percent(pct, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), size = 3.4, color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Stolen Auto by Patrol Division and Lighting",
+       x = "Patrol Division", y = "Share of Stolen Auto Incidents", fill = "Lighting") +
+  theme_minimal(base_size = 12)
+
+ggsave("figs/kc_general/stolen_auto_by_division_lighting.png", p1, width = 8.8, height = 5.2, dpi = 300)
+
+# ---- 2) Heatmap: Stolen Auto Beat × Hour ----
+# order beats numerically when possible
+beat_levels <- df_sa |>
+  summarise(num_beat = suppressWarnings(min(readr::parse_number(.data[[beat_col]]), na.rm = TRUE)), .by = !!sym(beat_col)) |>
+  mutate(num_beat = if_else(is.infinite(num_beat) | is.na(num_beat), Inf, num_beat)) |>
+  arrange(num_beat, !!sym(beat_col)) |>
+  pull(!!sym(beat_col))
+
+p2 <- df_sa |>
+  count(!!sym(beat_col), hour, name = "n") |>
+  tidyr::complete(!!sym(beat_col), hour = 0:23, fill = list(n = 0)) |>
+  mutate(beat_f = factor(.data[[beat_col]], levels = beat_levels)) |>
+  ggplot(aes(x = hour, y = beat_f, fill = n)) +
+  geom_tile() +
+  scale_x_continuous(breaks = seq(0,23,by=3)) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  labs(title = "Stolen Auto Heatmap — Beat by Hour",
+       x = "Hour of day", y = "Beat", fill = "Count") +
+  theme_minimal(base_size = 12)
+
+ggsave("figs/kc_general/stolen_auto_heatmap_beat_hour.png", p2, width = 7.8, height = 9.5, dpi = 300)
+
+
+
+
+
+
+
+
+
+
+
+
+# =========================
+# KC General Visuals (R)
+# 1) Stolen Auto by Division × Lighting (100% stacked bars)
+# 2) Stolen Auto Heatmap (Beat × Hour)
+# Assumes: beat is numeric in your CSV
+# =========================
+
+# ---- Setup ----
+packages <- c("tidyverse","janitor","lubridate","forcats","glue","stringr","scales")
+invisible(lapply(setNames(packages, packages), function(p) if(!require(p, character.only=TRUE)) install.packages(p)))
+invisible(lapply(packages, library, character.only = TRUE))
+dir.create("figs/kc_general", recursive = TRUE, showWarnings = FALSE)
+
+# ---- Load your general data (EDIT PATH IF NEEDED) ----
+data_path <- "C:/Users/Cliff/Desktop/R DATA/kcpd_2024_clean_ml_ready (1).csv"
+stopifnot(file.exists(data_path))
+df <- readr::read_csv(data_path, show_col_types = FALSE) |> janitor::clean_names()
+
+# ---- Column detection ----
+off_col  <- c("offense","description","ibrs","offense_category","offense_group") |> intersect(names(df)) |> purrr::pluck(1)
+area_col <- c("police_area","division","patrol_division","area") |> intersect(names(df)) |> purrr::pluck(1)
+beat_col <- "beat"; stopifnot(beat_col %in% names(df))  # beat is guaranteed present & numeric
+if (is.null(off_col) || is.null(area_col)) stop("Could not detect offense or division/area column.")
+
+# Ensure hour column; derive if needed
+if (!"hour" %in% names(df)) {
+  dt_guess <- c("reported_datetime","from_datetime","to_datetime","call_datetime") |> intersect(names(df)) |> purrr::pluck(1, .default = NA_character_)
+  if (is.na(dt_guess)) stop("No 'hour' column and no datetime column found to derive from.")
+  df <- df |> mutate(hour = lubridate::hour(lubridate::ymd_hms(.data[[dt_guess]], quiet = TRUE)))
+}
+df <- df |> mutate(hour = as.integer(hour))
+
+# ---- Filter to stolen-auto incidents (flexible label match) ----
+stolen_pat <- regex("motor\\s*vehicle\\s*theft|stolen\\s*auto|auto\\s*theft", ignore_case = TRUE)
+df_sa <- df |> filter(str_detect(.data[[off_col]], stolen_pat))
+
+# Quick guard: if none found, stop with a helpful message
+if (nrow(df_sa) == 0) stop("No stolen-auto rows found. Check offense labels or stolen_pat regex.")
+
+# ---- Lighting (use column if present; else infer Day/Night from hour) ----
+lighting_col <- c("lighting","light_condition","illumination") |> intersect(names(df_sa)) |> purrr::pluck(1, .default = NA_character_)
+if (!is.na(lighting_col)) {
+  df_sa <- df_sa |>
+    mutate(light_raw = str_to_title(as.character(.data[[lighting_col]]))) |>
+    mutate(light = case_when(
+      light_raw %in% c("Day","Daylight","Sunny") ~ "Day",
+      light_raw %in% c("Dark","Darkness","Night","Dark - Lighted","Dark - Not Lighted") ~ "Night",
+      TRUE ~ "Other"
+    )) |>
+    mutate(light = factor(light, levels = c("Day","Night","Other")))
+} else {
+  df_sa <- df_sa |>
+    mutate(light = if_else(hour %in% c(20:23,0:5), "Night", "Day")) |>
+    mutate(light = factor(light, levels = c("Day","Night")))
+}
+
+# ---- Coerce beat numeric & tidy ----
+df_sa <- df_sa |>
+  mutate(
+    !!beat_col := as.integer(.data[[beat_col]]),
+    !!area_col := as.character(.data[[area_col]])
+  )
+
+# =========================
+# 1) 100% stacked bars: Stolen Auto by Division × Lighting
+# =========================
+p1 <- df_sa |>
+  count(!!sym(area_col), light, name = "n") |>
+  group_by(!!sym(area_col)) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = .data[[area_col]], y = pct, fill = light)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(pct, accuracy = 1)),
+            position = position_stack(vjust = 0.5), size = 3.4, color = "white") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Stolen Auto by Patrol Division and Lighting",
+    x = "Patrol Division", y = "Share of Stolen Auto Incidents", fill = "Lighting"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave("figs/kc_general/stolen_auto_by_division_lighting.png", p1, width = 8.8, height = 5.2, dpi = 300)
+
+# =========================
+# 2) Heatmap: Stolen Auto (Beat × Hour)
+# =========================
+# Because beat is numeric, order simply by ascending beat number
+beat_levels <- df_sa |>
+  distinct(!!sym(beat_col)) |>
+  arrange(!!sym(beat_col)) |>
+  pull(!!sym(beat_col))
+
+p2 <- df_sa |>
+  count(!!sym(beat_col), hour, name = "n") |>
+  tidyr::complete(!!sym(beat_col), hour = 0:23, fill = list(n = 0)) |>
+  mutate(
+    beat_f = factor(.data[[beat_col]], levels = beat_levels),
+    hour   = as.integer(hour)
+  ) |>
+  ggplot(aes(x = hour, y = beat_f, fill = n)) +
+  geom_tile() +
+  scale_x_continuous(breaks = seq(0, 23, by = 3)) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  labs(
+    title = "Stolen Auto Heatmap — Beat by Hour",
+    x = "Hour of day", y = "Beat", fill = "Count"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave("figs/kc_general/stolen_auto_heatmap_beat_hour.png", p2, width = 7.8, height = 9.5, dpi = 300)
+
+# ---- Done ----
+message("Saved:",
+        "\n - figs/kc_general/stolen_auto_by_division_lighting.png",
+        "\n - figs/kc_general/stolen_auto_heatmap_beat_hour.png")
+
+print(p1)
+print(p2)
+
+
+
+
+
+
+
+
+
+
+
+
+# =========================
+# 2) Heatmap: Stolen Auto (Beat × Hour), beats 100–250 only
+# =========================
+beat_min <- 100L
+beat_max <- 250L
+
+df_sa_filt <- df_sa %>%
+  filter(dplyr::between(.data[[beat_col]], beat_min, beat_max))
+
+# order beats ascending (still numeric)
+beat_levels <- df_sa_filt %>%
+  distinct(!!sym(beat_col)) %>%
+  arrange(!!sym(beat_col)) %>%
+  pull(!!sym(beat_col))
+
+p2 <- df_sa_filt %>%
+  count(!!sym(beat_col), hour, name = "n") %>%
+  tidyr::complete(!!sym(beat_col), hour = 0:23, fill = list(n = 0)) %>%
+  mutate(
+    beat_f = factor(.data[[beat_col]], levels = beat_levels),
+    hour   = as.integer(hour)
+  ) %>%
+  ggplot(aes(x = hour, y = beat_f, fill = n)) +
+  geom_tile() +
+  scale_x_continuous(breaks = seq(0, 23, by = 3)) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  labs(
+    title = "Stolen Auto Heatmap — Beat (100–250) by Hour",
+    x = "Hour of day", y = "Beat", fill = "Count"
+  ) +
+  theme_minimal(base_size = 12)
+
+print(p2)
+ggsave("figs/kc_general/stolen_auto_heatmap_beat_hour_100_250.png",
+       p2, width = 7.8, height = 9.5, dpi = 300)
