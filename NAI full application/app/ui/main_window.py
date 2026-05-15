@@ -43,9 +43,21 @@ class MainWindow(QMainWindow):
         sb = QWidget(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
         layout = QVBoxLayout(sb)
         layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
-        logo = QLabel("NAI\nPro Forma"); logo.setObjectName("logo")
-        logo.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(logo)
+        logo_path = Path(__file__).parent.parent.parent / "assets" / "nai_logo.svg"
+        if logo_path.exists():
+            from PySide6.QtSvgWidgets import QSvgWidget
+            logo_svg = QSvgWidget(str(logo_path))
+            logo_svg.setFixedSize(160, 35)
+            logo_svg.setStyleSheet("background: transparent; margin: 16px;")
+            layout.addWidget(logo_svg)
+            sub = QLabel("Pro Forma Generator")
+            sub.setStyleSheet("color: #AAAAAA; font-size: 10px; padding: 0 16px 12px 16px;")
+            layout.addWidget(sub)
+        else:
+            logo = QLabel("NAI\nPro Forma")
+            logo.setObjectName("logo")
+            logo.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(logo)
         self._btn_dash = self._nav_btn("Dashboard", self.show_dashboard)
         self._btn_new = self._nav_btn("New Pro Forma", self.show_wizard)
         layout.addWidget(self._btn_dash); layout.addWidget(self._btn_new)
