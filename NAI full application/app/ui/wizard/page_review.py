@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QFileDialog, QMessageBox,
+    QPushButton, QLineEdit, QFileDialog, QMessageBox, QCheckBox,
 )
 from PySide6.QtCore import Qt
 from app.models.session import ProFormaSession
@@ -76,7 +76,11 @@ class ReviewPage(QWidget):
 
         self._folder_lbl = QLabel(f"Saving to: {self._folder}")
         self._folder_lbl.setStyleSheet("color:#666666; font-size:12px;")
-        layout.addWidget(self._folder_lbl); layout.addStretch()
+        layout.addWidget(self._folder_lbl)
+        self._pdf_check = QCheckBox("Also export PDF summary")
+        self._pdf_check.setChecked(True)
+        layout.addWidget(self._pdf_check)
+        layout.addStretch()
 
     def _browse(self):
         f = QFileDialog.getExistingDirectory(self, "Select Output Folder", self._folder)
@@ -87,12 +91,23 @@ class ReviewPage(QWidget):
     def commit(self):
         s = self.session
         fname = self._fname.text().strip() or "ProForma.xlsx"
-        if not fname.endswith(".xlsx"): fname += ".xlsx"
+        if not fname.endswith(".xlsx"):
+            fname += ".xlsx"
         path = os.path.join(self._folder, fname)
         try:
             write_workbook(s, path)
             res = calculate_proforma(s)
             save_run(s, path, res["nois"][0], res["values"][0], conn=self._db)
+            if self._pdf_check.isChecked():
+                from app.excel.pdf_writer import export_pdf
+                pdf_path = path[:-5] + ".pdf"
+                try:
+                    export_pdf(s, res, pdf_path)
+                except Exception as e_pdf:
+                    QMessageBox.warning(
+                        self, "PDF Export",
+                        f"PDF export failed: {e_pdf}\nExcel was saved successfully.",
+                    )
             os.startfile(path)
             self._on_generate()
         except Exception as e:

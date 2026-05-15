@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QStackedWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt
+from app.models.session import ProFormaSession
 
 
 def _load_styles() -> str:
@@ -33,11 +34,33 @@ class MainWindow(QMainWindow):
 
         from app.ui.dashboard import DashboardView
         from app.ui.wizard.wizard import WizardView
-        self.dashboard = DashboardView(on_new=self.show_wizard)
+        self.dashboard = DashboardView(
+            on_new=self.show_wizard,
+            on_edit=lambda session: self.show_wizard(session=session),
+        )
         self.wizard = WizardView(on_complete=self.show_dashboard, on_cancel=self.show_dashboard)
         self.stack.addWidget(self.dashboard)
         self.stack.addWidget(self.wizard)
         self.show_dashboard()
+        self._check_for_draft()
+
+    def _check_for_draft(self):
+        from app.db.draft import load_draft, clear_draft
+        draft = load_draft()
+        if not draft:
+            return
+        bname = draft.building_name or "Unnamed"
+        reply = QMessageBox.question(
+            self,
+            "Restore Draft",
+            f'An unsaved pro forma for "{bname}" was found. Restore it?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.wizard.load_session(draft)
+            self.show_wizard()
+        else:
+            clear_draft()
 
     def _make_sidebar(self) -> QWidget:
         sb = QWidget(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
@@ -78,9 +101,12 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(0)
         self._set_active(self._btn_dash)
 
-    def show_wizard(self):
-        if self.stack.currentIndex() == 1:
+    def show_wizard(self, session: ProFormaSession | None = None):
+        if session is None and self.stack.currentIndex() == 1:
             return
-        self.wizard.reset()
+        if session is not None:
+            self.wizard.load_session(session)
+        else:
+            self.wizard.reset()
         self.stack.setCurrentIndex(1)
         self._set_active(self._btn_new)

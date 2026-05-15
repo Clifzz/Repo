@@ -68,6 +68,25 @@ class TenantEntryPage(QWidget):
         self._drg = dspin(0, 100, suf="%"); self._drf = dspin(0, 1000, pre="$")
         self._drpc = dspin(0, 100, suf="%")
 
+        self._dy1.setToolTip(
+            "Optional: enter total annual rent for Year 1 to override the SF × Rate calculation. "
+            "Leave at 0 for no override. Accepts $0 for a rent-free year."
+        )
+        self._dpt.setToolTip(
+            "'compounded': rent grows by a fixed annual percentage each year.\n"
+            "'pro_rated': rent increases by a flat $/SF or percentage each year."
+        )
+        self._dgr.setToolTip("Annual growth rate applied to rent (compounded projection type only).")
+        self._dfl.setToolTip("Flat dollar increase to rate per SF each year (pro_rated flat type only).")
+        self._dpc.setToolTip("Percentage increase in rent each year (pro_rated percentage type only).")
+        self._drn.setToolTip("Check if this tenant has a renewal option within the projection window.")
+        self._drs.setToolTip("Date the renewal term begins.")
+        self._dry.setToolTip("Length of the renewal term in years.")
+        self._drp.setToolTip("Projection type for the renewal term (same logic as the base term).")
+        self._drg.setToolTip("Annual growth rate for the renewal term (compounded type only).")
+        self._drf.setToolTip("Flat $/SF/yr increase for the renewal term (pro_rated flat type only).")
+        self._drpc.setToolTip("Percentage increase per year for the renewal term (pro_rated pct type only).")
+
         for lbl, w in [
             ("Name", self._dn), ("Suite #", self._ds), ("SF", self._dsf),
             ("Rate/SF", self._dr), ("Lease Expiry", self._dex),

@@ -49,6 +49,17 @@ class BuildingInfoPage(QWidget):
         ]:
             form.addRow(label, widget)
 
+        self._year.setToolTip("The first calendar year of the projection (e.g. 2025).")
+        self._month.setToolTip("The month the projection begins within the start year.")
+        self._yrs.setToolTip("Number of full years to model. Determines how many columns appear in the Excel output.")
+        self._tot_sf.setToolTip("Gross leasable area of the building in square feet.")
+        self._occ_sf.setToolTip("Currently occupied square footage. Must not exceed Total SF.")
+        self._opex.setToolTip("Annual operating expenses per square foot. Grows at 2.5%/yr in the model.")
+        self._mkt_rt.setToolTip("Current market asking rent per square foot per year. Used as a benchmark row in the output.")
+        self._mkt_gw.setToolTip("Annual growth rate applied to the market rent benchmark.")
+        self._cap.setToolTip("Capitalization rate: Building Value = NOI ÷ Cap Rate.")
+        self._delta.setToolTip("The ± spread applied to the cap rate in the sensitivity analysis rows (e.g. 0.25% means ±0.25%).")
+
         self._err = QLabel(""); self._err.setStyleSheet("color: #C8102E;")
         outer.addWidget(self._err); self._populate()
 
@@ -62,9 +73,16 @@ class BuildingInfoPage(QWidget):
         self._cap.setValue(s.cap_rate * 100); self._delta.setValue(s.cap_delta * 100)
 
     def validate(self) -> bool:
-        ok = bool(self._name.text().strip())
-        self._err.setText("" if ok else "Building name is required.")
-        self._name.setProperty("invalid", "" if ok else "true")
+        name_ok = bool(self._name.text().strip())
+        sf_ok = self._occ_sf.value() <= self._tot_sf.value()
+        ok = name_ok and sf_ok
+        if not name_ok:
+            self._err.setText("Building name is required.")
+        elif not sf_ok:
+            self._err.setText("Occupied SF cannot exceed Total SF.")
+        else:
+            self._err.setText("")
+        self._name.setProperty("invalid", "" if name_ok else "true")
         self._name.style().unpolish(self._name); self._name.style().polish(self._name)
         return ok
 

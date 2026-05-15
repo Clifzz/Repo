@@ -14,10 +14,19 @@ from app.models.session import ProFormaSession
 _LOGO_PATH = Path(__file__).parent.parent.parent / "assets" / "nai_logo.svg"
 
 
+class _NumericItem(QTableWidgetItem):
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        try:
+            return (self.data(Qt.ItemDataRole.UserRole) or 0) < (other.data(Qt.ItemDataRole.UserRole) or 0)
+        except TypeError:
+            return super().__lt__(other)
+
+
 class DashboardView(QWidget):
-    def __init__(self, on_new):
+    def __init__(self, on_new, on_edit):
         super().__init__()
         self._on_new = on_new
+        self._on_edit = on_edit
         self._db = init_db()
         self._build_ui()
 
@@ -85,11 +94,14 @@ class DashboardView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setColumnWidth(4, 160)
+        self.table.setColumnWidth(4, 270)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicatorShown(True)
+        self.table.horizontalHeader().setSortIndicator(1, Qt.SortOrder.DescendingOrder)
         bl.addWidget(self.table)
 
         self._empty = QLabel("No pro formas yet — click New Pro Forma to get started")
@@ -99,6 +111,7 @@ class DashboardView(QWidget):
         layout.addWidget(body, 1)
 
     def refresh(self):
+        self.table.setSortingEnabled(False)
         runs = list_runs(conn=self._db)
         self.table.setRowCount(0)
         count = len(runs)
@@ -111,29 +124,41 @@ class DashboardView(QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
             dt = datetime.fromisoformat(run["created_at"]).strftime("%b %d, %Y  %I:%M %p")
-            for c, v in enumerate([
-                run["building_name"], dt,
-                f"${run['noi_y1']:,.0f}" if run["noi_y1"] else "—",
-                f"${run['value_y1']:,.0f}" if run["value_y1"] else "—",
-            ]):
-                item = QTableWidgetItem(v)
-                if c in (2, 3):
+            noi_val = run["noi_y1"] or 0.0
+            val_val = run["value_y1"] or 0.0
+            texts = [
+                run["building_name"],
+                dt,
+                f"${noi_val:,.0f}" if run["noi_y1"] else "—",
+                f"${val_val:,.0f}" if run["value_y1"] else "—",
+            ]
+            sort_keys = [None, None, noi_val, val_val]
+            for c, (v, key) in enumerate(zip(texts, sort_keys)):
+                if key is not None:
+                    item = _NumericItem(v)
+                    item.setData(Qt.ItemDataRole.UserRole, key)
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     )
+                else:
+                    item = QTableWidgetItem(v)
                 self.table.setItem(r, c, item)
             acts = QWidget()
             al = QHBoxLayout(acts)
             al.setContentsMargins(4, 2, 4, 2)
-            ob = QPushButton("Open")
-            ob.setObjectName("secondaryBtn")
-            db = QPushButton("Delete")
-            db.setObjectName("dangerBtn")
-            ob.clicked.connect(lambda _, rid=run["id"]: self._open(rid))
-            db.clicked.connect(lambda _, rid=run["id"]: self._delete(rid))
-            al.addWidget(ob)
-            al.addWidget(db)
+            al.setSpacing(4)
+            for label, slot, obj_name in [
+                ("Open",   lambda _, rid=run["id"]: self._open(rid),   "tableBtn"),
+                ("Edit",   lambda _, rid=run["id"]: self._edit(rid),   "tableBtn"),
+                ("Clone",  lambda _, rid=run["id"]: self._clone(rid),  "tableBtn"),
+                ("Delete", lambda _, rid=run["id"]: self._delete(rid), "dangerBtn"),
+            ]:
+                b = QPushButton(label)
+                b.setObjectName(obj_name)
+                b.clicked.connect(slot)
+                al.addWidget(b)
             self.table.setCellWidget(r, 4, acts)
+        self.table.setSortingEnabled(True)
 
     def _open(self, run_id: int):
         row = get_run(run_id, conn=self._db)
@@ -144,6 +169,23 @@ class DashboardView(QWidget):
             from app.excel.writer import write_workbook
             write_workbook(ProFormaSession.from_json(row["inputs_json"]), path)
         os.startfile(path)
+
+    def _edit(self, run_id: int):
+        row = get_run(run_id, conn=self._db)
+        if not row:
+            return
+        session = ProFormaSession.from_json(row["inputs_json"])
+        self._on_edit(session)
+
+    def _clone(self, run_id: int):
+        row = get_run(run_id, conn=self._db)
+        if not row:
+            return
+        session = ProFormaSession.from_json(row["inputs_json"])
+        session.building_name = (
+            f"{session.building_name} (Copy)" if session.building_name else "Copy"
+        )
+        self._on_edit(session)
 
     def _delete(self, run_id: int):
         if QMessageBox.question(

@@ -23,7 +23,7 @@ class WizardView(QWidget):
 
         self.page_building = BuildingInfoPage(self.session)
         self.page_tenants = TenantEntryPage(self.session)
-        self.page_review = ReviewPage(self.session, on_generate=self._on_complete)
+        self.page_review = ReviewPage(self.session, on_generate=self._on_generate_done)
         self.stack.addWidget(self.page_building)
         self.stack.addWidget(self.page_tenants)
         self.stack.addWidget(self.page_review)
@@ -40,11 +40,21 @@ class WizardView(QWidget):
         layout.addLayout(nav); self._update_nav()
 
     def reset(self):
+        from app.db.draft import clear_draft
+        clear_draft()
         self.session = ProFormaSession()
         self.page_building.bind(self.session)
         self.page_tenants.bind(self.session)
         self.page_review.bind(self.session)
         self.stack.setCurrentIndex(0); self._update_nav()
+
+    def load_session(self, session: ProFormaSession) -> None:
+        self.session = session
+        self.page_building.bind(session)
+        self.page_tenants.bind(session)
+        self.page_review.bind(session)
+        self.stack.setCurrentIndex(0)
+        self._update_nav()
 
     def _go_back(self):
         idx = self.stack.currentIndex()
@@ -54,11 +64,22 @@ class WizardView(QWidget):
     def _go_next(self):
         idx = self.stack.currentIndex()
         page = self.stack.widget(idx)
-        if hasattr(page, "validate") and not page.validate(): return
-        if hasattr(page, "commit"): page.commit()
+        if hasattr(page, "validate") and not page.validate():
+            return
+        if hasattr(page, "commit"):
+            page.commit()
         if idx < 2:
-            if idx == 1: self.page_review.refresh()
-            self.stack.setCurrentIndex(idx + 1); self._update_nav()
+            from app.db.draft import save_draft
+            save_draft(self.session)
+            if idx == 1:
+                self.page_review.refresh()
+            self.stack.setCurrentIndex(idx + 1)
+            self._update_nav()
+
+    def _on_generate_done(self) -> None:
+        from app.db.draft import clear_draft
+        clear_draft()
+        self._on_complete()
 
     def _update_nav(self):
         idx = self.stack.currentIndex()
