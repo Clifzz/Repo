@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" fill="#222222" rx="10"/>
+  <!-- NAI mark (original viewBox 0 0 71.65 46.19), scaled ~1.17x and centered -->
+  <!-- translate(8, 23) centers the 84x54 scaled mark in 100x100 -->
+  <g transform="translate(8, 23) scale(1.172)">
+    <polygon points="9.27 25.73 9.27 46.19 0 46.19 0 11.06 11.97 11.06 22.93 27.25 22.93 11.06 33.05 11.06 33.05 30.12 22.59 44.11 9.27 25.73" fill="#FFFFFF"/>
+    <rect x="62.38" y="11.06" width="9.27" height="35.13" fill="#FFFFFF"/>
+    <polygon points="48.57 46.19 59.27 46.19 59.27 0 24.7 46.18 35.67 46.18 50.16 26.86 50.16 37.42 42.74 37.48 48.57 46.19" fill="#CF3339"/>
+  </g>
+</svg>

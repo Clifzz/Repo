@@ -19,9 +19,9 @@ class TenantEntryPage(QWidget):
         self.session = session; self._refresh_table(); self._hide_detail()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self); layout.setContentsMargins(24, 24, 24, 0)
+        layout = QVBoxLayout(self); layout.setContentsMargins(32, 28, 32, 0)
         title = QLabel("Tenant Entry")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 12px;")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; margin-bottom: 12px;")
         layout.addWidget(title)
 
         self.table = QTableWidget(0, 7)

@@ -17,6 +17,10 @@ class ProFormaSession:
     market_growth_pct: float = 0.0
     cap_rate: float = 0.0
     cap_delta: float = 0.0025
+    notes: str = ""
+    purchase_price: float = 0.0
+    exit_cap_rate: float = 0.0
+    discount_rate: float = 0.08
     tenants: list[TenantModel] = field(default_factory=list)
 
     def to_json(self) -> str:
@@ -26,7 +30,9 @@ class ProFormaSession:
             "total_sqft": self.total_sqft, "occupied_sqft": self.occupied_sqft,
             "opex_psf": self.opex_psf, "market_avg_rate": self.market_avg_rate,
             "market_growth_pct": self.market_growth_pct, "cap_rate": self.cap_rate,
-            "cap_delta": self.cap_delta,
+            "cap_delta": self.cap_delta, "notes": self.notes,
+            "purchase_price": self.purchase_price, "exit_cap_rate": self.exit_cap_rate,
+            "discount_rate": self.discount_rate,
             "tenants": [t.to_dict() for t in self.tenants],
         }
         return json.dumps(d)

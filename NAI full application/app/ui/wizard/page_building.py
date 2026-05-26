@@ -14,13 +14,13 @@ class BuildingInfoPage(QWidget):
         self.session = session; self._populate()
 
     def _build_ui(self):
-        outer = QVBoxLayout(self); outer.setContentsMargins(24, 24, 24, 0)
+        outer = QVBoxLayout(self); outer.setContentsMargins(32, 28, 32, 0)
         title = QLabel("Building Information")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 12px;")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; margin-bottom: 12px;")
         outer.addWidget(title)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(scroll.Shape.NoFrame)
         card = QWidget(); card.setObjectName("card")
-        form = QFormLayout(card); form.setContentsMargins(20, 20, 20, 20); form.setSpacing(14)
+        form = QFormLayout(card); form.setContentsMargins(20, 20, 20, 20); form.setSpacing(16)
         scroll.setWidget(card); outer.addWidget(scroll)
 
         def spin(lo, hi, dec=0, step=1):

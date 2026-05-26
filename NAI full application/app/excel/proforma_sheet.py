@@ -12,13 +12,26 @@ from app.excel.cell_refs import (
 
 _THIN = Side("thin")
 _CB   = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-_HDR_FILL  = PatternFill("solid", fgColor="4F81BD")
-_SUBHDR_FILL = PatternFill("solid", fgColor="4A4A4A")
+_HDR_FILL    = PatternFill("solid", fgColor="C8102E")
+_SUBHDR_FILL = PatternFill("solid", fgColor="3A3A3C")
 _LGT_GREEN = PatternFill("solid", fgColor="C6EFCE")
 _DRK_GREEN = PatternFill("solid", fgColor="00B050")
 _RED_FONT  = Font(bold=True, color="C8102E")
 _BOLD      = Font(bold=True)
 _BOLD_WH   = Font(bold=True, color="FFFFFF")
+
+
+def _insert_logo(ws, logo_png: str | None, cell: str, width: int = 214, height: int = 47) -> None:
+    if not logo_png:
+        return
+    try:
+        from openpyxl.drawing.image import Image as XlImg
+        img = XlImg(logo_png)
+        img.width = width
+        img.height = height
+        ws.add_image(img, cell)
+    except Exception:
+        pass
 
 
 def _months_old(exp_ref: str) -> str:
@@ -102,10 +115,15 @@ def _tenant_formula(t_idx: int, y_idx: int, session: ProFormaSession) -> str:
     return formula
 
 
-def write_proforma_sheet(ws, session: ProFormaSession) -> None:
+def write_proforma_sheet(ws, session: ProFormaSession, logo_png: str | None = None) -> None:
+    ws.title = "ProForma"
     years = session.years; num_t = len(session.tenants)
     sc = PF_ASSUMP_START_COL; ps = PF_PROJ_START_COL
     proj_end = ps + years - 1
+
+    # Logo row (row 1 — white, tall enough for the image)
+    ws.row_dimensions[1].height = 52
+    _insert_logo(ws, logo_png, "A1", width=214, height=47)
 
     # Title
     ws.merge_cells(start_row=PF_TITLE_ROW, start_column=sc,
@@ -113,7 +131,7 @@ def write_proforma_sheet(ws, session: ProFormaSession) -> None:
     tc = ws.cell(row=PF_TITLE_ROW, column=sc,
                  value=f"={bldg_ref('building_name')}&\" Pro-Forma / Rent Roll\"")
     tc.font = Font(size=18, bold=True, color="FFFFFF")
-    tc.fill = PatternFill("solid", fgColor="333333")
+    tc.fill = PatternFill("solid", fgColor="C8102E")
     tc.alignment = Alignment(horizontal="center", vertical="center")
 
     # Expiring SF/% rows

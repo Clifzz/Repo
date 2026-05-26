@@ -5,7 +5,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QStackedWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtSvgWidgets import QSvgWidget
 from app.models.session import ProFormaSession
+
+_LOGO_PATH = Path(__file__).parent.parent / "assets" / "nai_logo.svg"
 
 
 def _load_styles() -> str:
@@ -23,11 +26,10 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         root = QWidget()
-        layout = QHBoxLayout(root)
+        layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.sidebar = self._make_sidebar()
-        layout.addWidget(self.sidebar)
+        layout.addWidget(self._make_top_bar())
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
@@ -43,6 +45,28 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.wizard)
         self.show_dashboard()
         self._check_for_draft()
+
+    def _make_top_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("topBar")
+        bar.setFixedHeight(56)
+        hl = QHBoxLayout(bar)
+        hl.setContentsMargins(24, 0, 24, 0)
+        hl.setSpacing(12)
+        if _LOGO_PATH.exists():
+            logo = QSvgWidget(str(_LOGO_PATH))
+            logo.setFixedSize(140, 30)
+            logo.setStyleSheet("background: transparent;")
+            hl.addWidget(logo)
+        title = QLabel("Pro Forma Generator")
+        title.setObjectName("topBarTitle")
+        hl.addWidget(title)
+        hl.addStretch()
+        self._new_btn = QPushButton("+ New Pro Forma")
+        self._new_btn.setObjectName("primaryBtn")
+        self._new_btn.clicked.connect(self.show_wizard)
+        hl.addWidget(self._new_btn)
+        return bar
 
     def _check_for_draft(self):
         from app.db.draft import load_draft, clear_draft
@@ -62,46 +86,14 @@ class MainWindow(QMainWindow):
         else:
             clear_draft()
 
-    def _make_sidebar(self) -> QWidget:
-        sb = QWidget(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
-        layout = QVBoxLayout(sb)
-        layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
-        logo_path = Path(__file__).parent.parent.parent / "assets" / "nai_logo.svg"
-        if logo_path.exists():
-            from PySide6.QtSvgWidgets import QSvgWidget
-            logo_svg = QSvgWidget(str(logo_path))
-            logo_svg.setFixedSize(160, 35)
-            logo_svg.setStyleSheet("background: transparent; margin: 16px;")
-            layout.addWidget(logo_svg)
-            sub = QLabel("Pro Forma Generator")
-            sub.setStyleSheet("color: #AAAAAA; font-size: 10px; padding: 0 16px 12px 16px;")
-            layout.addWidget(sub)
-        else:
-            logo = QLabel("NAI\nPro Forma")
-            logo.setObjectName("logo")
-            logo.setAlignment(Qt.AlignmentFlag.AlignLeft)
-            layout.addWidget(logo)
-        self._btn_dash = self._nav_btn("Dashboard", self.show_dashboard)
-        self._btn_new = self._nav_btn("New Pro Forma", self.show_wizard)
-        layout.addWidget(self._btn_dash); layout.addWidget(self._btn_new)
-        layout.addStretch()
-        return sb
-
-    def _nav_btn(self, label: str, slot) -> QPushButton:
-        btn = QPushButton(label); btn.setObjectName("navBtn")
-        btn.clicked.connect(slot); return btn
-
-    def _set_active(self, active: QPushButton):
-        for b in (self._btn_dash, self._btn_new):
-            b.setProperty("active", b is active)
-            b.style().unpolish(b); b.style().polish(b)
-
     def show_dashboard(self):
         self.dashboard.refresh()
         self.stack.setCurrentIndex(0)
-        self._set_active(self._btn_dash)
+        self._new_btn.setVisible(True)
 
     def show_wizard(self, session: ProFormaSession | None = None):
+        if not isinstance(session, ProFormaSession):
+            session = None
         if session is None and self.stack.currentIndex() == 1:
             return
         if session is not None:
@@ -109,4 +101,4 @@ class MainWindow(QMainWindow):
         else:
             self.wizard.reset()
         self.stack.setCurrentIndex(1)
-        self._set_active(self._btn_new)
+        self._new_btn.setVisible(False)

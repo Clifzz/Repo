@@ -26,6 +26,21 @@ def init_db(path: str | None = None) -> sqlite3.Connection:
             value_y1 REAL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_name TEXT NOT NULL,
+            building_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            inputs_json TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
     conn.commit()
     return conn
 
@@ -89,6 +104,69 @@ def delete_run(run_id: int, conn: sqlite3.Connection | None = None) -> None:
     c = init_db() if _owned else conn
     try:
         c.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        c.commit()
+    finally:
+        if _owned:
+            c.close()
+
+
+def save_template(
+    name: str, session: ProFormaSession,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    _owned = conn is None
+    c = init_db() if _owned else conn
+    try:
+        cur = c.execute(
+            "INSERT INTO templates (template_name, building_name, created_at, inputs_json) "
+            "VALUES (?,?,?,?)",
+            (name, session.building_name, datetime.now().isoformat(), session.to_json()),
+        )
+        c.commit()
+        return cur.lastrowid
+    finally:
+        if _owned:
+            c.close()
+
+
+def list_templates(conn: sqlite3.Connection | None = None) -> list[dict]:
+    _owned = conn is None
+    c = init_db() if _owned else conn
+    try:
+        rows = c.execute(
+            "SELECT id, template_name, building_name, created_at "
+            "FROM templates ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+        return [{"id": r[0], "template_name": r[1], "building_name": r[2],
+                 "created_at": r[3]} for r in rows]
+    finally:
+        if _owned:
+            c.close()
+
+
+def get_template(template_id: int, conn: sqlite3.Connection | None = None) -> dict | None:
+    _owned = conn is None
+    c = init_db() if _owned else conn
+    try:
+        r = c.execute(
+            "SELECT id, template_name, building_name, created_at, inputs_json "
+            "FROM templates WHERE id=?",
+            (template_id,),
+        ).fetchone()
+        if not r:
+            return None
+        return {"id": r[0], "template_name": r[1], "building_name": r[2],
+                "created_at": r[3], "inputs_json": r[4]}
+    finally:
+        if _owned:
+            c.close()
+
+
+def delete_template(template_id: int, conn: sqlite3.Connection | None = None) -> None:
+    _owned = conn is None
+    c = init_db() if _owned else conn
+    try:
+        c.execute("DELETE FROM templates WHERE id=?", (template_id,))
         c.commit()
     finally:
         if _owned:

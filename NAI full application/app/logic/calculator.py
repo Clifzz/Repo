@@ -90,3 +90,50 @@ def generate_assumptions(session: ProFormaSession) -> tuple[list[dict], dict]:
         "total_as_is_rent": total_as_is, "pct_occupied": pct_occ,
         "pct_vacant": 100.0 - pct_occ, "walt": walt,
     }
+
+
+def _irr(cash_flows: list[float]) -> float | None:
+    # Newton-Raphson from seed 10%. Converges only when a positive IRR exists;
+    # returns None for negative IRR, all-positive flows, or non-convergent cases.
+    rate = 0.1
+    for _ in range(1000):
+        try:
+            f_val = sum(cf / (1 + rate) ** t for t, cf in enumerate(cash_flows))
+            df_val = sum(-t * cf / (1 + rate) ** (t + 1) for t, cf in enumerate(cash_flows))
+        except (ZeroDivisionError, OverflowError):
+            return None
+        if df_val == 0:
+            return None
+        new_rate = rate - f_val / df_val
+        if abs(new_rate - rate) < 1e-7:
+            return new_rate
+        rate = new_rate
+    return None
+
+
+def _npv(cash_flows: list[float], discount_rate: float) -> float:
+    return sum(cf / (1 + discount_rate) ** t for t, cf in enumerate(cash_flows))
+
+
+def calculate_irr_npv(session: ProFormaSession, result: dict) -> dict:
+    effective_purchase = (
+        session.purchase_price if session.purchase_price > 0 else result["values"][0]
+    )
+    effective_exit_cap = (
+        session.exit_cap_rate if session.exit_cap_rate > 0 else session.cap_rate
+    )
+    exit_value = result["nois"][-1] / effective_exit_cap if effective_exit_cap > 0 else 0.0
+    cash_flows = (
+        [-effective_purchase]
+        + list(result["nois"][:-1])
+        + [result["nois"][-1] + exit_value]
+    )
+    irr = _irr(cash_flows)
+    npv = _npv(cash_flows, session.discount_rate)
+    return {
+        "irr": irr,
+        "npv": npv,
+        "exit_value": exit_value,
+        "effective_purchase": effective_purchase,
+        "effective_exit_cap": effective_exit_cap,
+    }

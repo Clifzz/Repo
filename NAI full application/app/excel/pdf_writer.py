@@ -1,11 +1,16 @@
 from __future__ import annotations
+import html as html_mod
 from datetime import datetime
 from app.models.session import ProFormaSession
 
 
-def export_pdf(session: ProFormaSession, result: dict, output_path: str) -> None:
+def export_pdf(
+    session: ProFormaSession,
+    result: dict,
+    output_path: str,
+    irr_data: dict | None = None,
+) -> None:
     from PySide6.QtGui import QPdfWriter, QTextDocument, QPageLayout, QPageSize, QMarginsF
-
     writer = QPdfWriter(output_path)
     writer.setPageLayout(QPageLayout(
         QPageSize(QPageSize.PageSizeId.Letter),
@@ -13,11 +18,15 @@ def export_pdf(session: ProFormaSession, result: dict, output_path: str) -> None
         QMarginsF(15, 15, 15, 15),
     ))
     doc = QTextDocument()
-    doc.setHtml(_build_html(session, result))
+    doc.setHtml(_build_html(session, result, irr_data=irr_data))
     doc.print_(writer)
 
 
-def _build_html(session: ProFormaSession, result: dict) -> str:
+def _build_html(
+    session: ProFormaSession,
+    result: dict,
+    irr_data: dict | None = None,
+) -> str:
     s = session
     tenant_rows = "".join(
         f"<tr><td>{t.name}</td><td>{t.suite}</td><td>{t.sqft:,.0f}</td>"
@@ -33,20 +42,42 @@ def _build_html(session: ProFormaSession, result: dict) -> str:
     low_val = noi_y1 / (cap - delta) if (cap - delta) > 0 else 0.0
     high_val = noi_y1 / (cap + delta) if (cap + delta) > 0 else 0.0
 
+    # Notes section
+    notes_html = ""
+    if s.notes.strip():
+        escaped = html_mod.escape(s.notes).replace("\n", "<br/>")
+        notes_html = f"""
+  <h3>Deal Notes &amp; Assumptions</h3>
+  <p>{escaped}</p>
+"""
+
+    # Return Analysis section
+    return_html = ""
+    if irr_data is not None:
+        irr_str = f"{irr_data['irr']:.2%}" if irr_data.get("irr") is not None else "N/A"
+        eff_exit = irr_data.get("effective_exit_cap", s.cap_rate)
+        return_html = f"""
+  <h3>Return Analysis</h3>
+  <table cellpadding="4">
+    <tr><td><b>Purchase Price:</b></td><td>${irr_data['effective_purchase']:,.0f}</td></tr>
+    <tr><td><b>Exit Cap Rate:</b></td><td>{eff_exit:.2%}</td></tr>
+    <tr><td><b>Exit Value:</b></td><td>${irr_data['exit_value']:,.0f}</td></tr>
+    <tr><td><b>IRR:</b></td><td>{irr_str}</td></tr>
+    <tr><td><b>NPV ({s.discount_rate:.1%} discount rate):</b></td><td>${irr_data['npv']:,.0f}</td></tr>
+  </table>
+"""
+
     return f"""
 <html>
 <body style="font-family: Segoe UI, Arial, sans-serif; color: #222222; font-size: 10pt;">
   <h1 style="color: #C8102E; margin-bottom: 4px;">NAI Horizon — Pro Forma Summary</h1>
   <h2 style="margin-top: 0;">{s.building_name}</h2>
-  <p style="color: #666666; margin-top: 0;">
-    Generated: {datetime.now().strftime("%B %d, %Y")}
-  </p>
+  <p style="color: #666666; margin-top: 0;">Generated: {datetime.now().strftime("%B %d, %Y")}</p>
   <hr style="border: none; border-top: 1px solid #DDDDDD;"/>
 
   <h3>Building Parameters</h3>
   <table cellpadding="4">
-    <tr><td><b>Projection Period:</b></td>
-        <td>{s.start_month}/{s.start_year} — {s.years} years</td></tr>
+    <tr><td><b>Projection Period:</b></td><td>{s.start_month}/{s.start_year} — {s.years} years</td></tr>
     <tr><td><b>Total SF:</b></td><td>{s.total_sqft:,.0f}</td></tr>
     <tr><td><b>Occupied SF:</b></td><td>{s.occupied_sqft:,.0f}</td></tr>
     <tr><td><b>OpEx / SF:</b></td><td>${s.opex_psf:.2f}</td></tr>
@@ -78,12 +109,12 @@ def _build_html(session: ProFormaSession, result: dict) -> str:
     <tr style="background-color: #4A4A4A; color: #FFFFFF;">
       <th>Scenario</th><th>Cap Rate</th><th>Value</th>
     </tr>
-    <tr><td>Low (− {s.cap_delta:.2%})</td>
-        <td>{cap - delta:.2%}</td><td>${low_val:,.0f}</td></tr>
-    <tr><td>Base</td>
-        <td>{cap:.2%}</td><td>${val_y1:,.0f}</td></tr>
-    <tr><td>High (+ {s.cap_delta:.2%})</td>
-        <td>{cap + delta:.2%}</td><td>${high_val:,.0f}</td></tr>
+    <tr><td>Low (− {s.cap_delta:.2%})</td><td>{cap - delta:.2%}</td><td>${low_val:,.0f}</td></tr>
+    <tr><td>Base</td><td>{cap:.2%}</td><td>${val_y1:,.0f}</td></tr>
+    <tr><td>High (+ {s.cap_delta:.2%})</td><td>{cap + delta:.2%}</td><td>${high_val:,.0f}</td></tr>
   </table>
+
+  {return_html}
+  {notes_html}
 </body>
 </html>"""
