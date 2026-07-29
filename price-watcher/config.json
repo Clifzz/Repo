@@ -1,0 +1,21 @@
+{
+  "$comment": "Edit this file to change what is watched. No code changes needed.",
+
+  "dealThreshold": 60,
+  "currency": "USD",
+
+  "watch": [
+    {
+      "id": "azazie-doretta-ink-blue",
+      "label": "Azazie Doretta — Ink Blue Mermaid Pleated Stretch Satin",
+      "url": "https://www.azazie.com/products/azazie-doretta-ink-blue-mermaid-pleated-stretch-satin-floor-length-bridesmaid-dress/36463173?size=bd_a0&from_color_filter=1",
+      "priceSelector": null,
+      "sanity": { "min": 10, "max": 900 }
+    }
+  ],
+
+  "notifyOnPriceIncrease": true,
+  "historyLimit": 250,
+  "failureAlertAfterConsecutive": 3,
+  "failureAlertCooldownHours": 12
+}
