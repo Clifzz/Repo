@@ -50,10 +50,15 @@ function hoursSince(iso) {
   return (Date.now() - new Date(iso).getTime()) / 36e5;
 }
 
-async function testEmail(config, recipients, smsRecipients) {
+async function testEmail(config, recipients, operatorRecipients, smsRecipients) {
   const item = config.watch[0];
   const user = await verifyTransport();
   say(`SMTP connection OK as ${user}`);
+
+  // Smoke tests go to whoever is setting this up, not to the people waiting on
+  // price news — nobody wants a "[TEST]" message from a robot they didn't
+  // configure. Falls back to the recipients only if no operator is known.
+  const testTarget = operatorRecipients.length > 0 ? operatorRecipients : recipients;
 
   const mail = templates.watchStarted({
     item,
@@ -64,13 +69,14 @@ async function testEmail(config, recipients, smsRecipients) {
     method: 'test',
   });
   await sendMail({
-    to: recipients,
+    to: testTarget,
     subject: `[TEST] ${mail.subject}`,
     html: mail.html,
     text: mail.text,
     dryRun: DRY_RUN,
   });
-  say(`Test email sent to ${recipients.join(', ')}`);
+  say(`Test email sent to ${testTarget.join(', ')}`);
+  say(`(Real alerts will go to ${recipients.join(', ')}.)`);
 
   // Gateway delivery is the least predictable part of the setup, so prove it
   // works before relying on it for the real alert.
@@ -273,7 +279,7 @@ async function main() {
   if (DRY_RUN) say('- **DRY RUN** — no email will actually be sent.');
 
   if (TEST_EMAIL) {
-    await testEmail(config, recipients, smsRecipients);
+    await testEmail(config, recipients, operatorRecipients, smsRecipients);
     writeStepSummary();
     return;
   }
