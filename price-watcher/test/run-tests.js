@@ -103,10 +103,23 @@ test('returns null price when nothing resembles a price', () => {
   assert.strictEqual(r.usableCount, 0);
 });
 
-test('detects a sold-out product', () => {
-  const html = `<meta property="product:price:amount" content="99"><div>Sold Out</div>`;
+test('reports OutOfStock from structured availability data', () => {
+  const html = `<meta property="product:price:amount" content="99">
+    <script type="application/ld+json">
+    {"@type":"Product","offers":{"@type":"Offer","price":"99",
+     "availability":"https://schema.org/OutOfStock"}}</script>`;
   const r = extractPrice({ html, sanity: SANITY });
-  assert.strictEqual(r.availability, 'OutOfStock');
+  assert.strictEqual(r.availability, 'https://schema.org/OutOfStock');
+});
+
+test('a sold-out SIZE does not mark the whole product unavailable', () => {
+  // Size pickers routinely label individual variants "Sold Out"; treating that
+  // as product-level stock status produced a false OutOfStock on the real page.
+  const html = `<meta property="product:price:amount" content="99">
+    <select><option>A0</option><option>A2 - Sold Out</option></select>`;
+  const r = extractPrice({ html, sanity: SANITY });
+  assert.strictEqual(r.availability, null);
+  assert.strictEqual(r.price, 99, 'price must still be read normally');
 });
 
 test('parses comma-grouped prices from visible text', () => {

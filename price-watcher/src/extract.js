@@ -168,11 +168,18 @@ function fromTextScan(text, candidates) {
   }
 }
 
+/**
+ * Only structured availability data is trusted.
+ *
+ * A page-wide text search for "sold out" reads as OutOfStock on any storefront
+ * whose size or colour picker labels individual unavailable variants — which is
+ * most of them, and which says nothing about the product as a whole. Reporting
+ * nothing beats reporting a plausible-looking wrong answer, so the loose text
+ * match was removed rather than tuned.
+ */
 function detectAvailability(html) {
-  const lower = html.toLowerCase();
   if (/"availability"\s*:\s*"[^"]*outofstock/i.test(html)) return 'OutOfStock';
   if (/"availability"\s*:\s*"[^"]*instock/i.test(html)) return 'InStock';
-  if (/\bsold\s*out\b/.test(lower)) return 'OutOfStock';
   return null;
 }
 
