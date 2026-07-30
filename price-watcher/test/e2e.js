@@ -47,6 +47,7 @@ async function runCheck(label) {
     STATE_PATH: statePath,
     RECIPIENT_EMAILS: 'friend@example.com',
     OPERATOR_EMAIL: 'owner@example.com',
+    SMS_RECIPIENTS: '5555550123@vtext.example',
   });
   delete env.GITHUB_STEP_SUMMARY;
   delete env.GITHUB_OUTPUT;
@@ -129,10 +130,11 @@ async function main() {
 
   persist(99, null);
   currentPrice = '89.00';
-  r = await runCheck('2. Price drops to $89 (above target) → calm change email');
+  r = await runCheck('2. Price drops to $89 (above target) → calm change email, no text');
   check('detected $89', /Price: \*\*\$89\*\*/.test(r.out));
   check('change email sent to friend', /Change email sent to friend@example\.com/.test(r.out));
   check('subject shows the transition', /Price dropped: \$99 → \$89/.test(r.out));
+  check('did NOT text for a non-deal change', !/would text/.test(r.out));
 
   persist(89, null);
   r = await runCheck('3. Unchanged at $89 → silence');
@@ -144,10 +146,13 @@ async function main() {
   check('deal alert fired', /DEAL ALERT SENT/.test(r.out));
   check('alert went to the friend', /would email friend@example\.com/.test(r.out));
   check('subject is loud and has the price', /GO GET IT NOW/.test(r.out) && /\$54/.test(r.out));
+  check('text ALSO sent for the deal', /would text 5555550123@vtext\.example/.test(r.out));
+  check('text body carries the price', /sms body.*\$54/.test(r.out));
 
   persist(54, 54);
-  r = await runCheck('5. Still $54 → must NOT re-spam');
+  r = await runCheck('5. Still $54 → must NOT re-spam (email or text)');
   check('no repeat deal alert', !/DEAL ALERT SENT/.test(r.out) && !/would email/.test(r.out));
+  check('no repeat text either', !/would text/.test(r.out));
 
   persist(54, 54);
   currentPrice = '39.00';

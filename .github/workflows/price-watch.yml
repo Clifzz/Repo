@@ -64,6 +64,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
           OPERATOR_EMAIL: ${{ secrets.OPERATOR_EMAIL }}
+          SMS_RECIPIENTS: ${{ secrets.SMS_RECIPIENTS }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SCRAPER_ENDPOINT: ${{ secrets.SCRAPER_ENDPOINT }}

@@ -63,10 +63,43 @@ async function sendMail({ to, subject, html, text, env = process.env, dryRun = f
   return info;
 }
 
+/**
+ * Text-only delivery for carrier email-to-SMS gateways.
+ *
+ * Gateways reject or mangle multipart/HTML mail, so this sends a bare
+ * text/plain body. A gateway rejecting one number must not take down the
+ * email alerts, so failures are logged and swallowed rather than thrown.
+ */
+async function sendSms({ to, text, subject = '', env = process.env, dryRun = false }) {
+  const recipients = Array.isArray(to) ? to : parseRecipients(to);
+  if (recipients.length === 0) return { skipped: true };
+
+  if (dryRun) {
+    console.log(`[dry-run] would text ${recipients.join(', ')}`);
+    console.log(`[dry-run] sms body (${text.length} chars): ${text}`);
+    return { dryRun: true, accepted: recipients };
+  }
+
+  try {
+    const { transport, user } = buildTransport(env);
+    const info = await transport.sendMail({
+      from: user, // bare address: gateways choke on display-name formatting
+      to: recipients.join(', '),
+      subject,
+      text,
+    });
+    console.log(`SMS sent via gateway to ${recipients.join(', ')} (id ${info.messageId})`);
+    return info;
+  } catch (err) {
+    console.error(`SMS delivery failed (email alerts unaffected): ${err.message}`);
+    return { error: err.message };
+  }
+}
+
 async function verifyTransport(env = process.env) {
   const { transport, user } = buildTransport(env);
   await transport.verify();
   return user;
 }
 
-module.exports = { sendMail, verifyTransport, parseRecipients };
+module.exports = { sendMail, sendSms, verifyTransport, parseRecipients };

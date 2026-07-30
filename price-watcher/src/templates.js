@@ -204,4 +204,47 @@ ${item.url}
   return { subject, html, text };
 }
 
-module.exports = { dealAlert, priceChange, watchStarted, failureAlert, money };
+/**
+ * SMS bodies, for carrier email-to-SMS gateways.
+ *
+ * Deliberately different from the email templates: plain ASCII only (emoji can
+ * silently upgrade the message to MMS or arrive as mojibake on older handsets),
+ * no HTML, and short enough to stay in one or two 160-character segments.
+ * Gateways truncate hard, so the price and the link come first.
+ */
+
+function smsLink(item) {
+  // Long query-string URLs eat the whole segment budget; config can supply a
+  // shortened link instead.
+  return item.shortUrl || item.url;
+}
+
+function smsDeal({ item, price, previousPrice, threshold }) {
+  const was = previousPrice ? ` (was ${money(previousPrice)})` : '';
+  return {
+    subject: '',
+    text: `*** PRICE DROP *** The dress is ${money(price)}${was} - your ${money(
+      threshold
+    )} target hit! GO: ${smsLink(item)}`,
+  };
+}
+
+function smsChange({ item, price, previousPrice, threshold }) {
+  const dir = price < previousPrice ? 'down' : 'up';
+  const gap = price - threshold;
+  const tail = gap > 0 ? ` Still ${money(gap)} over your ${money(threshold)} target.` : '';
+  return {
+    subject: '',
+    text: `Price ${dir}: ${money(previousPrice)} -> ${money(price)}.${tail} ${smsLink(item)}`,
+  };
+}
+
+module.exports = {
+  dealAlert,
+  priceChange,
+  watchStarted,
+  failureAlert,
+  smsDeal,
+  smsChange,
+  money,
+};

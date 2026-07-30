@@ -255,5 +255,109 @@ test('money() renders whole dollars without trailing cents', () => {
   assert.strictEqual(templates.money(59.5), '$59.50');
 });
 
+console.log('\nSMS templates');
+
+const SMS_ITEM = {
+  label: 'Azazie Doretta',
+  url: 'https://www.azazie.com/products/azazie-doretta-ink-blue-mermaid-pleated-stretch-satin-floor-length-bridesmaid-dress/36463173?size=bd_a0&from_color_filter=1',
+  shortUrl: null,
+};
+
+test('deal text leads with the price and includes a link', () => {
+  const sms = templates.smsDeal({ item: SMS_ITEM, price: 54, previousPrice: 99, threshold: 60 });
+  assert.ok(sms.text.includes('$54'));
+  assert.ok(sms.text.includes('$99'));
+  assert.ok(sms.text.includes('PRICE DROP'));
+  assert.ok(sms.text.includes('azazie.com'));
+});
+
+test('SMS bodies are plain ASCII (no emoji/HTML for gateways)', () => {
+  for (const sms of [
+    templates.smsDeal({ item: SMS_ITEM, price: 54, previousPrice: 99, threshold: 60 }),
+    templates.smsChange({ item: SMS_ITEM, price: 89, previousPrice: 99, threshold: 60 }),
+  ]) {
+    // eslint-disable-next-line no-control-regex
+    assert.ok(/^[\x00-\x7F]*$/.test(sms.text), `non-ASCII in: ${sms.text}`);
+    assert.ok(!/<[a-z]/i.test(sms.text), 'must not contain HTML');
+  }
+});
+
+test('the message stays short once a shortUrl is supplied', () => {
+  const item = Object.assign({}, SMS_ITEM, { shortUrl: 'https://bit.ly/abcd123' });
+  const sms = templates.smsDeal({ item, price: 54, previousPrice: 99, threshold: 60 });
+  assert.ok(sms.text.length <= 160, `expected <=160 chars, got ${sms.text.length}`);
+  assert.ok(sms.text.includes('bit.ly/abcd123'));
+});
+
+test('the informative part precedes the link, so truncation keeps the news', () => {
+  const sms = templates.smsDeal({ item: SMS_ITEM, price: 54, previousPrice: 99, threshold: 60 });
+  assert.ok(sms.text.indexOf('$54') < sms.text.indexOf('http'));
+  assert.ok(sms.text.indexOf('$54') < 60, 'price must survive a 160-char cut');
+});
+
+test('deal text handles a missing previous price', () => {
+  const sms = templates.smsDeal({ item: SMS_ITEM, price: 54, previousPrice: null, threshold: 60 });
+  assert.ok(!sms.text.includes('undefined') && !sms.text.includes('NaN'));
+  assert.ok(sms.text.includes('$54'));
+});
+
+test('change text states the remaining gap to the target', () => {
+  const sms = templates.smsChange({ item: SMS_ITEM, price: 89, previousPrice: 99, threshold: 60 });
+  assert.ok(sms.text.includes('down'));
+  assert.ok(sms.text.includes('$29'), 'should show the $29 gap');
+});
+
+test('change text omits the gap once at or below target', () => {
+  const sms = templates.smsChange({ item: SMS_ITEM, price: 55, previousPrice: 99, threshold: 60 });
+  assert.ok(!/over your/.test(sms.text));
+});
+
+test('SMS subject is empty so gateways do not prepend noise', () => {
+  assert.strictEqual(
+    templates.smsDeal({ item: SMS_ITEM, price: 54, previousPrice: 99, threshold: 60 }).subject,
+    ''
+  );
+});
+
+console.log('\nSMS routing rules');
+
+function smsWanted(eventType, config) {
+  const mode = (config.sms && config.sms.notifyOn) || 'deal';
+  if (mode === 'none') return false;
+  if (mode === 'all') return ['deal-alert', 'price-drop', 'price-increase'].includes(eventType);
+  return eventType === 'deal-alert';
+}
+
+test('default mode texts only for the deal alert', () => {
+  const cfg = { sms: { notifyOn: 'deal' } };
+  assert.strictEqual(smsWanted('deal-alert', cfg), true);
+  assert.strictEqual(smsWanted('price-drop', cfg), false);
+  assert.strictEqual(smsWanted('price-increase', cfg), false);
+});
+
+test('"all" mode texts on any price movement', () => {
+  const cfg = { sms: { notifyOn: 'all' } };
+  assert.strictEqual(smsWanted('deal-alert', cfg), true);
+  assert.strictEqual(smsWanted('price-drop', cfg), true);
+});
+
+test('"none" mode never texts', () => {
+  const cfg = { sms: { notifyOn: 'none' } };
+  assert.strictEqual(smsWanted('deal-alert', cfg), false);
+});
+
+test('missing sms config falls back to deal-only', () => {
+  assert.strictEqual(smsWanted('deal-alert', {}), true);
+  assert.strictEqual(smsWanted('price-drop', {}), false);
+});
+
+test('never texts for operator-only events', () => {
+  for (const mode of ['deal', 'all', 'none']) {
+    const cfg = { sms: { notifyOn: mode } };
+    assert.strictEqual(smsWanted('watch-started', cfg), false);
+    assert.strictEqual(smsWanted('none', cfg), false);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

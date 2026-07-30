@@ -46,6 +46,7 @@ Optional extras:
 | Secret name | Value |
 |---|---|
 | `OPERATOR_EMAIL` | where *setup confirmations and breakage warnings* go. Defaults to `GMAIL_USER`. Set this to your own address so the recipient only ever gets price news. |
+| `SMS_RECIPIENTS` | carrier email-to-SMS gateway address(es) — see [Text alerts](#-text-alerts-optional) |
 | `SMTP_HOST` / `SMTP_PORT` | to use a provider other than Gmail |
 | `SCRAPER_ENDPOINT` | fallback rendering proxy — see [If it gets blocked](#if-it-gets-blocked) |
 
@@ -72,12 +73,12 @@ That's it. From then on it runs itself every 30 minutes.
 
 ## What each email looks like
 
-| When | Who gets it | Subject |
-|---|---|---|
-| Price hits **$60 or less** | recipients | 🚨🎉 IT'S $54!!! THE DRESS DROPPED — GO GET IT NOW 🎉🚨 |
-| Any other price change | recipients | 📉 Price dropped: $99 → $89 — *(item)* |
-| First successful check | operator only | ✅ Price watch is live — … is $99 |
-| Broken for 3 checks running | operator only | ⚠️ Price watcher can't read the price |
+| When | Who gets it | Subject | Text too? |
+|---|---|---|---|
+| Price hits **$60 or less** | recipients | 🚨🎉 IT'S $54!!! THE DRESS DROPPED — GO GET IT NOW 🎉🚨 | ✅ yes |
+| Any other price change | recipients | 📉 Price dropped: $99 → $89 — *(item)* | — |
+| First successful check | operator only | ✅ Price watch is live — … is $99 | — |
+| Broken for 3 checks running | operator only | ⚠️ Price watcher can't read the price | — |
 
 Preview them in a browser without sending anything:
 
@@ -91,6 +92,56 @@ cd price-watcher && node test/preview.js && open test/preview-index.html
 - Price sitting at $54 for a week → **one** alert, not 336 of them.
 - Price drops *further* ($54 → $39) → alerts again, because that's news.
 - Price goes back above $60 → the alert re-arms, so the next drop alerts again.
+
+---
+
+## 📱 Text alerts (optional)
+
+A text can be sent alongside the email at no cost, using the recipient's
+carrier email-to-SMS gateway. No Twilio account, no phone number to rent —
+the same Gmail account sends it.
+
+**Setup:** add an `SMS_RECIPIENTS` secret containing the 10-digit number
+@-joined to the carrier's gateway domain, e.g. `5551234567@vtext.com`.
+Multiple numbers can be comma-separated.
+
+| Carrier | Gateway address |
+|---|---|
+| Verizon (also Visible, Xfinity Mobile) | `5551234567@vtext.com` |
+| T-Mobile (also Mint, Ultra) | `5551234567@tmomail.net` |
+| AT&T (also Cricket via `sms.cricketwireless.net`) | `5551234567@txt.att.net` |
+| Google Fi | `5551234567@msg.fi.google.com` |
+| US Cellular | `5551234567@email.uscc.net` |
+| Metro by T-Mobile | `5551234567@mymetropcs.com` |
+| Boost | `5551234567@sms.myboostmobile.com` |
+
+Not sure of the carrier? [freecarrierlookup.com](https://freecarrierlookup.com)
+will tell you from the number. If the number was ported between carriers, the
+area code proves nothing — look it up.
+
+**By default only the $60 deal alert sends a text.** Routine price changes stay
+email-only, because a text interrupts and an email waits. Change
+`sms.notifyOn` in `config.json` to `"all"` or `"none"` to adjust.
+
+Test it with the `test_email` workflow run — it sends a sample text too, so you
+can confirm the gateway works before relying on it.
+
+> ### ⚠️ Honest caveat about gateway texts
+>
+> These gateways are free and unofficial, and carriers have been tightening
+> spam filtering on them for years — some have deprecated them outright.
+> Delivery is **usually** fine but is not guaranteed or supported by anyone.
+>
+> Treat the text as a bonus on top of the email, not a replacement. The email
+> is the reliable channel. If texts prove flaky and it matters, the upgrade is
+> Twilio (~$1/month for a number plus well under a cent per message) — though
+> sending to US numbers now also requires A2P 10DLC brand registration, which
+> takes a few days to get approved.
+
+**Message length:** the Azazie product URL is ~150 characters on its own, so the
+text arrives as two joined segments. Phones stitch these together seamlessly. To
+get it under the 160-character single-segment limit, put a shortened link in
+`shortUrl` in `config.json` — the text uses it automatically when set.
 
 ---
 

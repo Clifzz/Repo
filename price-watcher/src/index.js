@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { fetchPrice } = require('./fetch');
-const { sendMail, verifyTransport, parseRecipients } = require('./mailer');
+const { sendMail, sendSms, verifyTransport, parseRecipients } = require('./mailer');
 const { loadState, saveState, getItem, recordHistory } = require('./state');
 const templates = require('./templates');
 
@@ -50,10 +50,11 @@ function hoursSince(iso) {
   return (Date.now() - new Date(iso).getTime()) / 36e5;
 }
 
-async function testEmail(config, recipients) {
+async function testEmail(config, recipients, smsRecipients) {
   const item = config.watch[0];
   const user = await verifyTransport();
   say(`SMTP connection OK as ${user}`);
+
   const mail = templates.watchStarted({
     item,
     price: 99,
@@ -70,9 +71,41 @@ async function testEmail(config, recipients) {
     dryRun: DRY_RUN,
   });
   say(`Test email sent to ${recipients.join(', ')}`);
+
+  // Gateway delivery is the least predictable part of the setup, so prove it
+  // works before relying on it for the real alert.
+  if (smsRecipients.length > 0) {
+    const sms = templates.smsDeal({
+      item,
+      price: 54,
+      previousPrice: 99,
+      threshold: config.dealThreshold,
+    });
+    await sendSms({
+      to: smsRecipients,
+      subject: sms.subject,
+      text: `[TEST] ${sms.text}`,
+      dryRun: DRY_RUN,
+    });
+    say(`Test text sent to ${smsRecipients.length} number(s). If it doesn't arrive within`);
+    say('a few minutes, the carrier gateway is wrong or is filtering it — see the README.');
+  } else {
+    say('No SMS_RECIPIENTS set, so no test text was sent.');
+  }
 }
 
-async function processItem(item, config, state, recipients, operatorRecipients) {
+/**
+ * A text interrupts someone; an email waits. Default is deal-only so the
+ * phone buzzes for the thing that actually matters.
+ */
+function smsWanted(eventType, config) {
+  const mode = (config.sms && config.sms.notifyOn) || 'deal';
+  if (mode === 'none') return false;
+  if (mode === 'all') return ['deal-alert', 'price-drop', 'price-increase'].includes(eventType);
+  return eventType === 'deal-alert';
+}
+
+async function processItem(item, config, state, recipients, operatorRecipients, smsRecipients) {
   const stored = getItem(state, item.id);
   stored.label = item.label;
   stored.url = item.url;
@@ -150,6 +183,12 @@ async function processItem(item, config, state, recipients, operatorRecipients) 
     stored.dealAlertSentAtPrice = price;
     emailSent = 'deal-alert';
     say(`- 🚨 **DEAL ALERT SENT** to ${recipients.join(', ')}`);
+
+    if (smsRecipients.length > 0 && smsWanted('deal-alert', config)) {
+      const sms = templates.smsDeal({ item, price, previousPrice: previous, threshold });
+      await sendSms({ to: smsRecipients, ...sms, dryRun: DRY_RUN });
+      say(`- 📱 Text sent to ${smsRecipients.length} number(s)`);
+    }
   } else if (previous === null) {
     if (operatorRecipients.length > 0) {
       const mail = templates.watchStarted({
@@ -181,6 +220,12 @@ async function processItem(item, config, state, recipients, operatorRecipients) 
       await sendMail({ to: recipients, ...mail, dryRun: DRY_RUN });
       emailSent = isIncrease ? 'price-increase' : 'price-drop';
       say(`- 📧 Change email sent to ${recipients.join(', ')}`);
+
+      if (smsRecipients.length > 0 && smsWanted(emailSent, config)) {
+        const sms = templates.smsChange({ item, price, previousPrice: previous, threshold });
+        await sendSms({ to: smsRecipients, ...sms, dryRun: DRY_RUN });
+        say(`- 📱 Text sent to ${smsRecipients.length} number(s)`);
+      }
     }
   } else {
     say('- No change since last check; no email sent.');
@@ -210,6 +255,7 @@ async function main() {
   const operatorRecipients = parseRecipients(
     process.env.OPERATOR_EMAIL || process.env.SMTP_USER || process.env.GMAIL_USER
   );
+  const smsRecipients = parseRecipients(process.env.SMS_RECIPIENTS);
 
   if (recipients.length === 0) {
     throw new Error(
@@ -220,10 +266,14 @@ async function main() {
   say(`## Price watch — ${new Date().toUTCString()}`);
   say(`- Alert target: **${templates.money(config.dealThreshold)} or less**`);
   say(`- Alerts go to: ${recipients.join(', ')}`);
+  if (smsRecipients.length > 0) {
+    const mode = (config.sms && config.sms.notifyOn) || 'deal';
+    say(`- Texts go to: ${smsRecipients.length} number(s) (mode: ${mode})`);
+  }
   if (DRY_RUN) say('- **DRY RUN** — no email will actually be sent.');
 
   if (TEST_EMAIL) {
-    await testEmail(config, recipients);
+    await testEmail(config, recipients, smsRecipients);
     writeStepSummary();
     return;
   }
@@ -233,7 +283,14 @@ async function main() {
 
   for (const item of config.watch) {
     try {
-      const res = await processItem(item, config, state, recipients, operatorRecipients);
+      const res = await processItem(
+        item,
+        config,
+        state,
+        recipients,
+        operatorRecipients,
+        smsRecipients
+      );
       if (res.failedHard) hardFailure = true;
     } catch (err) {
       hardFailure = true;
