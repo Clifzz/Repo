@@ -55,10 +55,17 @@ async function testEmail(config, recipients, operatorRecipients, smsRecipients) 
   const user = await verifyTransport();
   say(`SMTP connection OK as ${user}`);
 
-  // Smoke tests go to whoever is setting this up, not to the people waiting on
-  // price news — nobody wants a "[TEST]" message from a robot they didn't
-  // configure. Falls back to the recipients only if no operator is known.
-  const testTarget = operatorRecipients.length > 0 ? operatorRecipients : recipients;
+  // Test mail goes to the operator *and* the real recipients: the point is to
+  // prove delivery end to end, and an address that silently spam-filters the
+  // alert is exactly what this run needs to catch. Deduped case-insensitively
+  // so nobody gets two copies when the operator is also a recipient.
+  const seen = new Set();
+  const testTarget = [...operatorRecipients, ...recipients].filter((addr) => {
+    const key = addr.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   const mail = templates.watchStarted({
     item,
@@ -76,7 +83,6 @@ async function testEmail(config, recipients, operatorRecipients, smsRecipients) 
     dryRun: DRY_RUN,
   });
   say(`Test email sent to ${testTarget.join(', ')}`);
-  say(`(Real alerts will go to ${recipients.join(', ')}.)`);
 
   // Gateway delivery is the least predictable part of the setup, so prove it
   // works before relying on it for the real alert.
