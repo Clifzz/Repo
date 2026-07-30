@@ -1,4 +1,23 @@
 {
   "version": 1,
-  "items": {}
+  "items": {
+    "azazie-doretta-ink-blue": {
+      "label": "Azazie Doretta — Ink Blue Mermaid Pleated Stretch Satin",
+      "url": "https://www.azazie.com/products/azazie-doretta-ink-blue-mermaid-pleated-stretch-satin-floor-length-bridesmaid-dress/36463173?size=bd_a0&from_color_filter=1",
+      "lastPrice": 99,
+      "currency": "USD",
+      "availability": "OutOfStock",
+      "lastCheckedOn": "2026-07-30",
+      "lastChangedAt": "2026-07-30T23:37:46.851Z",
+      "dealAlertSentAtPrice": null,
+      "consecutiveFailures": 0,
+      "lastFailureNotifiedAt": null,
+      "history": [
+        {
+          "t": "2026-07-30T23:37:46.852Z",
+          "price": 99
+        }
+      ]
+    }
+  }
 }
