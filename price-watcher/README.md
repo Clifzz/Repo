@@ -39,18 +39,22 @@ Go to **[Settings → Secrets and variables → Actions](../../settings/secrets/
 |---|---|
 | `GMAIL_USER` | the Gmail address that sends, e.g. `you@gmail.com` |
 | `GMAIL_APP_PASSWORD` | the 16-character App Password from Step 1 |
-| `RECIPIENT_EMAILS` | `sarahg10116@gmail.com` |
+| `RECIPIENT_EMAILS` | the address to alert, e.g. `friend@gmail.com` |
 
 Optional extras:
 
 | Secret name | Value |
 |---|---|
-| `OPERATOR_EMAIL` | where *setup confirmations and breakage warnings* go. Defaults to `GMAIL_USER`. Set this to your own address so Sarah only ever gets price news. |
+| `OPERATOR_EMAIL` | where *setup confirmations and breakage warnings* go. Defaults to `GMAIL_USER`. Set this to your own address so the recipient only ever gets price news. |
 | `SMTP_HOST` / `SMTP_PORT` | to use a provider other than Gmail |
 | `SCRAPER_ENDPOINT` | fallback rendering proxy — see [If it gets blocked](#if-it-gets-blocked) |
 
 > To alert more than one person, put several addresses in `RECIPIENT_EMAILS`
 > separated by commas.
+
+> ⚠️ **Keep personal contact details in secrets, never in `config.json` or this
+> README.** This repository is public — anything committed here is world-readable
+> and gets scraped. Secrets are encrypted and never appear in logs.
 
 ### Step 3 — Test it
 
