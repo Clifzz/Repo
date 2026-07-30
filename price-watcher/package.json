@@ -1,0 +1,20 @@
+{
+  "name": "price-watcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloud price watcher that emails on price changes and shouts on a target-price drop.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "check": "node src/index.js",
+    "check:dry": "node src/index.js --dry-run",
+    "test:email": "node src/index.js --test-email"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.16",
+    "playwright": "^1.49.1"
+  }
+}

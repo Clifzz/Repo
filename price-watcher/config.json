@@ -1,0 +1,27 @@
+{
+  "$comment": "Edit this file to change what is watched. No code changes needed.",
+
+  "dealThreshold": 60,
+  "currency": "USD",
+
+  "watch": [
+    {
+      "id": "azazie-doretta-ink-blue",
+      "label": "Azazie Doretta — Ink Blue Mermaid Pleated Stretch Satin",
+      "url": "https://www.azazie.com/products/azazie-doretta-ink-blue-mermaid-pleated-stretch-satin-floor-length-bridesmaid-dress/36463173?size=bd_a0&from_color_filter=1",
+      "shortUrl": null,
+      "priceSelector": null,
+      "sanity": { "min": 10, "max": 900 }
+    }
+  ],
+
+  "sms": {
+    "$comment": "notifyOn: 'deal' = text only when the target price is hit, 'all' = text on any change, 'none' = email only. Numbers live in the SMS_RECIPIENTS secret, never here.",
+    "notifyOn": "deal"
+  },
+
+  "notifyOnPriceIncrease": true,
+  "historyLimit": 250,
+  "failureAlertAfterConsecutive": 3,
+  "failureAlertCooldownHours": 12
+}

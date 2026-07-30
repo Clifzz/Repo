@@ -1,0 +1,98 @@
+name: Dress price watch
+
+on:
+  schedule:
+    # Every 30 minutes. Off-the-hour minutes so we don't pile onto GitHub's
+    # busiest scheduling ticks (which delays runs). Times are UTC.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Check the price but do not send any email'
+        type: boolean
+        default: false
+      test_email:
+        description: 'Send a test email to confirm SMTP works, then stop'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: price-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: price-watcher
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Cache Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # Keyed on the lockfile, not package.json: a new Playwright version
+          # needs a different Chromium build, and reusing a stale cached one
+          # makes the browser fail to launch.
+          key: playwright-chromium-${{ hashFiles('price-watcher/package-lock.json') }}
+
+      # Run unconditionally: on a cache hit this just verifies the build is
+      # present instead of re-downloading, and it still installs the apt
+      # libraries, which the cache does not cover.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Check price
+        id: check
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
+          OPERATOR_EMAIL: ${{ secrets.OPERATOR_EMAIL }}
+          SMS_RECIPIENTS: ${{ secrets.SMS_RECIPIENTS }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SCRAPER_ENDPOINT: ${{ secrets.SCRAPER_ENDPOINT }}
+          MAIL_FROM_NAME: Dress Price Watcher
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ inputs.test_email }}" = "true" ]; then ARGS="$ARGS --test-email"; fi
+          node src/index.js $ARGS
+
+      - name: Commit updated price state
+        # Runs even when the check step failed, so a recorded failure count
+        # survives to the next run instead of resetting every time.
+        if: always() && github.event_name != 'workflow_dispatch'
+        working-directory: .
+        run: |
+          if [ -z "$(git status --porcelain price-watcher/state)" ]; then
+            echo "No state change to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add price-watcher/state
+          git commit -m "chore(price-watch): update tracked price state [skip ci]"
+          for i in 1 2 3 4; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "Push attempt $i failed; retrying..."
+            sleep $((2 ** i))
+          done
+          echo "Could not push state update." >&2
+          exit 1
